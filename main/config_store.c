@@ -5,17 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "board.h"
-#include "driver/sdmmc_host.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_vfs_fat.h"
 #include "nvs.h"
-#include "sdmmc_cmd.h"
+#include "sdcard.h"
 
 static const char *TAG = "config";
 
-#define MOUNT_POINT "/sdcard"
 #define MAX_CONFIG_BYTES (16 * 1024)
 #define NVS_NAMESPACE "assistant"
 #define NVS_KEY "config_json"
@@ -23,8 +19,8 @@ static const char *TAG = "config";
 // Windows hides extensions, so a file saved as "config.json" in Notepad is often
 // really "config.json.txt". Accept that too.
 static const char *const k_paths[] = {
-    MOUNT_POINT "/config.json",
-    MOUNT_POINT "/config.json.txt",
+    SDCARD_ROOT "/config.json",
+    SDCARD_ROOT "/config.json.txt",
 };
 
 typedef enum { SD_OK, SD_NO_CARD, SD_NOT_FAT, SD_NO_FILE, SD_TOO_BIG } sd_result_t;
@@ -57,27 +53,8 @@ static char *read_file(const char *path, bool *too_big)
 
 static sd_result_t read_from_sd(char **out)
 {
-    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot.width = 1;
-    slot.clk = PIN_SD_CLK;
-    slot.cmd = PIN_SD_CMD;
-    slot.d0 = PIN_SD_D0;
-    slot.d1 = slot.d2 = slot.d3 = GPIO_NUM_NC;  // the defaults name pins this board uses elsewhere
-    slot.d4 = slot.d5 = slot.d6 = slot.d7 = GPIO_NUM_NC;
-    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
-
-    esp_vfs_fat_sdmmc_mount_config_t mount = {
-        .format_if_mount_failed = false,  // never wipe someone's card
-        .max_files = 2,
-        .allocation_unit_size = 16 * 1024,
-    };
-    sdmmc_card_t *card = NULL;
-    esp_err_t err = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot, &mount, &card);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "SD card not mounted: %s", esp_err_to_name(err));
-        return err == ESP_FAIL ? SD_NOT_FAT : SD_NO_CARD;
-    }
+    sdcard_status_t st = sdcard_mount();
+    if (st != SDCARD_OK) return st == SDCARD_NOT_FAT ? SD_NOT_FAT : SD_NO_CARD;
 
     sd_result_t result = SD_NO_FILE;
     for (size_t i = 0; i < sizeof k_paths / sizeof k_paths[0]; i++) {
@@ -94,7 +71,7 @@ static sd_result_t read_from_sd(char **out)
             break;
         }
     }
-    esp_vfs_fat_sdcard_unmount(MOUNT_POINT, card);
+    sdcard_unmount();
     return result;
 }
 

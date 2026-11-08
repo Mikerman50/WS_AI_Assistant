@@ -10,7 +10,7 @@ set(PICO_SRCS
 list(TRANSFORM PICO_SRCS PREPEND "pico/lib/")
 
 idf_component_register(
-    SRCS "picotts_direct.c" "picotts_esp.c" "esp_picorsrc.c" "voice_data.S" ${PICO_SRCS}
+    SRCS "picotts_direct.c" "picotts_esp.c" "esp_picorsrc.c" ${PICO_SRCS}
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "pico/lib" "."
     PRIV_REQUIRES heap)
@@ -24,10 +24,5 @@ set_source_files_properties(${PICO_SRCS} PROPERTIES COMPILE_FLAGS "-w -O2")
 # it, and picotts_direct.c supplies an accurate one (see there).
 set_source_files_properties("pico/lib/picoos.c" PROPERTIES COMPILE_OPTIONS "-Dpicoos_quick_exp=picoos_quick_nope")
 
-# Voice data (about 1 MB) goes into the app image and is read in place from
-# flash. voice_data.S embeds it with the alignment the engine needs.
-set(PICO_TA "${CMAKE_CURRENT_LIST_DIR}/pico/lang/en-GB_ta.bin")
-set(PICO_SG "${CMAKE_CURRENT_LIST_DIR}/pico/lang/en-GB_kh0_sg.bin")
-set_source_files_properties("voice_data.S" PROPERTIES
-    COMPILE_DEFINITIONS "PICOTTS_TA_FILE=\"${PICO_TA}\";PICOTTS_SG_FILE=\"${PICO_SG}\""
-    OBJECT_DEPENDS "${PICO_TA};${PICO_SG}")
+# The voice data (about 1 MB) is loaded from the SD card at start-up (see
+# main/main.c): the flash is taken up by the speech recognition model.

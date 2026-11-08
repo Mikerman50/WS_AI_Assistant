@@ -10,14 +10,10 @@
     "web_search": false,
     "context": ""
   },
-  "elevenlabs": {
-    "api_key": "YOUR_ELEVENLABS_API_KEY",
-    "stt_model": "scribe_v2",
-    "language": "en"
-  },
   "listen": {
-    "max_seconds": 30,
-    "mic_gain_db": 30
+    "max_seconds": 20,
+    "mic_gain_db": 30,
+    "language_model": true
   },
   "display": {
     "rotation": 0,

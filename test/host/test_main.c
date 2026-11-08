@@ -6,14 +6,13 @@
 
 #include <math.h>
 
+#include "asr_text.h"
 #include "audio_level.h"
 #include "captions.h"
 #include "config_parse.h"
 #include "face.h"
 #include "gfx.h"
-#include "multipart.h"
 #include "sse.h"
-#include "stt_parse.h"
 #include "text_stream.h"
 #include "tts_text.h"
 #include "utf8.h"
@@ -344,12 +343,10 @@ static void test_config(void)
     CHECK(c.claude_max_tokens == 300 && !c.claude_web_search);
     CHECK(c.display_rotation == 0 && c.display_busy_active_high && c.speech_pace_cps == 15);
     CHECK_STR(c.claude_context, "");
-    CHECK_STR(c.elevenlabs_stt_model, "scribe_v2");
-    CHECK_STR(c.elevenlabs_language, "");
-    CHECK(c.listen_max_seconds == 30 && c.listen_mic_gain_db == 30);
+    CHECK(c.listen_max_seconds == 20 && c.listen_mic_gain_db == 30 && c.listen_language_model);
     CHECK(c.speech_enabled && c.speech_volume == 70 && c.speech_speed == 100 && c.speech_pitch == 100);
 
-    // Every field set. (elevenlabs.voice_id is left over from an older version
+    // Every field set. (The elevenlabs section is left over from an older version
     // and is ignored, like any unknown setting.)
     const char *full =
         "{\n"
@@ -358,7 +355,7 @@ static void test_config(void)
         "             \"web_search\": true, \"context\": \"Our cat is called Biscuit.\"},\n"
         "  \"elevenlabs\": {\"api_key\": \"el-key\", \"voice_id\": \"v123\", \"stt_model\": \"scribe_v1\",\n"
         "                 \"language\": \"en\"},\n"
-        "  \"listen\": {\"max_seconds\": 45, \"mic_gain_db\": 36},\n"
+        "  \"listen\": {\"max_seconds\": 25, \"mic_gain_db\": 36, \"language_model\": false},\n"
         "  \"display\": {\"rotation\": 2, \"busy_active_high\": false},\n"
         "  \"speech\": {\"enabled\": false, \"volume\": 40, \"speed\": 120, \"pitch\": 90,\n"
         "             \"pace_chars_per_sec\": 18},\n"
@@ -370,10 +367,7 @@ static void test_config(void)
     CHECK_STR(c.claude_model, "claude-sonnet-5-5");
     CHECK(c.claude_max_tokens == 500 && c.claude_web_search);
     CHECK_STR(c.claude_context, "Our cat is called Biscuit.");
-    CHECK_STR(c.elevenlabs_api_key, "el-key");
-    CHECK_STR(c.elevenlabs_stt_model, "scribe_v1");
-    CHECK_STR(c.elevenlabs_language, "en");
-    CHECK(c.listen_max_seconds == 45 && c.listen_mic_gain_db == 36);
+    CHECK(c.listen_max_seconds == 25 && c.listen_mic_gain_db == 36 && !c.listen_language_model);
     CHECK(c.display_rotation == 2 && !c.display_busy_active_high && c.speech_pace_cps == 18);
     CHECK(!c.speech_enabled && c.speech_volume == 40 && c.speech_speed == 120 && c.speech_pitch == 90);
 
@@ -406,8 +400,10 @@ static void test_config(void)
          "display.rotation must be 0 to 3."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\", \"web_search\": \"yes\"}}",
          "claude.web_search must be true or false."},
-        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"listen\": {\"max_seconds\": 90}}",
-         "listen.max_seconds must be 5 to 60."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"listen\": {\"max_seconds\": 40}}",
+         "listen.max_seconds must be 5 to 30."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"listen\": {\"language_model\": 1}}",
+         "listen.language_model must be true or false."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"listen\": {\"mic_gain_db\": -1}}",
          "listen.mic_gain_db must be 0 to 42."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"enabled\": \"yes\"}}",
@@ -427,11 +423,9 @@ static void test_config(void)
 
     // An empty model falls back to the default; an over-long context is refused.
     CHECK(parse("{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\", \"model\": \"\"}}", &c, err));
-    CHECK(parse("{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"},"
-                " \"elevenlabs\": {\"api_key\": \"YOUR_ELEVENLABS_API_KEY\", \"stt_model\": \"\"}}", &c, err));
-    CHECK_STR(c.elevenlabs_api_key, "");
-    CHECK_STR(c.elevenlabs_stt_model, "scribe_v2");
     CHECK_STR(c.claude_model, "claude-haiku-5-5");
+    // An old-style "elevenlabs" entry, even a malformed one, doesn't matter any more.
+    CHECK(parse("{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"elevenlabs\": 5}", &c, err));
     char *big = malloc(APP_CONTEXT_MAX + 200);
     strcpy(big, "{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\", \"context\": \"");
     size_t at = strlen(big);
@@ -540,66 +534,55 @@ static void test_audio_level(void)
     CHECK(audio_mouth(-15.0f) == 1.0f);
     CHECK(audio_mouth(0.0f) == 1.0f);
     CHECK(audio_mouth(quiet) > 0.0f && audio_mouth(quiet) < 0.1f);  // the -43 dBFS tone: barely open
+
+    // Speech level for the recogniser: 1 s of quiet room, 2 s of "speech" at
+    // -40 dBFS, then quiet again. The gain should bring the speech to -20 dBFS
+    // whatever the room noise does.
+    static int16_t rec[64000];
+    unsigned seed = 12345;
+    for (int i = 0; i < 64000; i++) {
+        seed = seed * 1103515245u + 12345u;
+        int noise = (int)((seed >> 16) % 21) - 10;  // about -73 dBFS of hiss
+        double tone = (i >= 16000 && i < 48000) ? 463.0 * sin(2 * 3.14159265358979 * 300.0 * i / 16000.0) : 0.0;
+        rec[i] = (int16_t)lround(tone + noise);
+    }
+    float g = audio_speech_gain(rec, 64000);
+    CHECK(g > 9.0f && g < 11.0f);  // -40 -> -20 dBFS is x10
+    audio_apply_gain(rec, 64000, g);
+    float after = audio_rms_dbfs(rec + 16000, 32000);
+    CHECK(after > -20.5f && after < -19.5f);
+    // Silence, a loud recording, a tiny one.
+    memset(rec, 0, sizeof rec);
+    CHECK(audio_speech_gain(rec, 64000) == 1.0f);
+    CHECK(audio_speech_gain(rec, 100) == 1.0f);
+    for (int i = 0; i < 64000; i++)  // very loud speech between pauses: turned down, but at most 4x
+        rec[i] = (int16_t)((i >= 16000 && i < 48000) ? lround(23000.0 * sin(2 * 3.14159265358979 * 300.0 * i / 16000.0)) : 0);
+    CHECK(audio_speech_gain(rec, 64000) == 0.25f);
+    for (int i = 0; i < 64000; i++) rec[i] = (int16_t)((i / 8) % 2 ? 30000 : -30000);
+    CHECK(audio_speech_gain(rec, 64000) == 1.0f);  // a steady din: nothing stands out, left alone
+    // Gain saturates instead of wrapping.
+    int16_t clip[3] = {20000, -20000, 100};
+    audio_apply_gain(clip, 3, 2.0f);
+    CHECK(clip[0] == 32767 && clip[1] == -32768 && clip[2] == 200);
 }
 
-// ---------------------------------------------------------------- multipart upload framing
-
-static void test_multipart(void)
+static void test_asr_tidy(void)
 {
-    char head[512], tail[64];
-    mp_field_t f[] = {{"model_id", "scribe_v2"}, {"file_format", "pcm_s16le_16"}};
-    int n = multipart_head(head, sizeof head, "B0UNDARY", f, 2, "file", "speech.pcm", "application/octet-stream");
-    CHECK_STR(head,
-              "--B0UNDARY\r\nContent-Disposition: form-data; name=\"model_id\"\r\n\r\nscribe_v2\r\n"
-              "--B0UNDARY\r\nContent-Disposition: form-data; name=\"file_format\"\r\n\r\npcm_s16le_16\r\n"
-              "--B0UNDARY\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.pcm\"\r\n"
-              "Content-Type: application/octet-stream\r\n\r\n");
-    CHECK(n == (int)strlen(head));
-    int k = multipart_tail(tail, sizeof tail, "B0UNDARY");
-    CHECK_STR(tail, "\r\n--B0UNDARY--\r\n");
-    CHECK(k == (int)strlen(tail));
-    CHECK(multipart_head(head, 40, "B0UNDARY", f, 2, "file", "a", "b") == -1);  // too small
-    CHECK(multipart_tail(tail, 8, "B0UNDARY") == -1);
-}
-
-// ---------------------------------------------------------------- transcript parsing
-
-static void test_stt_parse(void)
-{
-    char text[64], err[96];
-
-    const char *ok =
-        "{\"language_code\":\"en\",\"language_probability\":0.98,"
-        "\"text\":\"  Will it rain\\n tomorrow?  \",\"words\":[{\"text\":\"Will\",\"type\":\"word\",\"logprob\":0}]}";
-    CHECK(stt_parse_response(200, ok, text, sizeof text, err, sizeof err) == STT_TEXT);
-    CHECK_STR(text, "Will it rain tomorrow?");
-
-    CHECK(stt_parse_response(200, "{\"text\":\"\"}", text, sizeof text, err, sizeof err) == STT_EMPTY);
-    CHECK(stt_parse_response(200, "{\"text\":\" ... \"}", text, sizeof text, err, sizeof err) == STT_EMPTY);
-    CHECK_STR(text, "");
-    CHECK(stt_parse_response(200, "{\"text\":\"Caf\xC3\xA9\"}", text, sizeof text, err, sizeof err) == STT_TEXT);
-    CHECK_STR(text, "Caf\xC3\xA9");
-
-    // Long transcripts are cut on a character boundary.
-    char small[8];
-    CHECK(stt_parse_response(200, "{\"text\":\"abcd\xC3\xA9\xC3\xA9xyz\"}", small, sizeof small, err, sizeof err) == STT_TEXT);
-    CHECK_STR(small, "abcd\xC3\xA9");
-
-    CHECK(stt_parse_response(200, "not json", text, sizeof text, err, sizeof err) == STT_ERROR);
-    CHECK_STR(err, "ElevenLabs sent an unexpected reply.");
-    CHECK(stt_parse_response(401, "{\"detail\":{\"status\":\"invalid_api_key\",\"message\":\"Invalid API key\"}}",
-                             text, sizeof text, err, sizeof err) == STT_ERROR);
-    CHECK_STR(err, "ElevenLabs didn't accept the API key.");
-    CHECK(stt_parse_response(400, "{\"detail\":{\"status\":\"quota_exceeded\",\"message\":\"...\"}}",
-                             text, sizeof text, err, sizeof err) == STT_ERROR);
-    CHECK_STR(err, "The ElevenLabs account is out of credit.");
-    CHECK(stt_parse_response(422, "{\"detail\":[{\"loc\":[\"body\",\"model_id\"],\"msg\":\"bad\",\"type\":\"x\"}]}",
-                             text, sizeof text, err, sizeof err) == STT_ERROR);
-    CHECK_STR(err, "ElevenLabs couldn't use the recording.");
-    CHECK(stt_parse_response(429, NULL, text, sizeof text, err, sizeof err) == STT_ERROR);
-    CHECK_STR(err, "ElevenLabs is busy. Try again in a moment.");
-    CHECK(stt_parse_response(503, "", text, sizeof text, err, sizeof err) == STT_ERROR);
-    CHECK_STR(err, "Transcription failed (error 503).");
+    char out[64];
+    CHECK(asr_tidy("  whats the weather   like tomorrow ", out, sizeof out) == strlen("Whats the weather like tomorrow"));
+    CHECK_STR(out, "Whats the weather like tomorrow");
+    asr_tidy("i think i'm late and i'll call if i've time i'd say", out, sizeof out);
+    CHECK_STR(out, "I think I'm late and I'll call if I've time I'd say");
+    asr_tidy("is it in italy", out, sizeof out);
+    CHECK_STR(out, "Is it in italy");  // only the pronoun changes
+    asr_tidy("", out, sizeof out);
+    CHECK_STR(out, "");
+    asr_tidy("   ", out, sizeof out);
+    CHECK_STR(out, "");
+    char small[12];
+    CHECK(asr_tidy("hello there my friend", small, sizeof small) == strlen("Hello there"));
+    CHECK_STR(small, "Hello there");  // whole words only
+    CHECK(asr_tidy("x", out, 0) == 0);
 }
 
 static void test_utf8_truncate(void)
@@ -668,10 +651,9 @@ int main(void)
     test_config();
     test_voice_ctl();
     test_audio_level();
-    test_multipart();
-    test_stt_parse();
     test_utf8_truncate();
     test_tts_prepare();
+    test_asr_tidy();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

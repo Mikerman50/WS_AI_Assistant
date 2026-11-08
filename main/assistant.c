@@ -145,7 +145,7 @@ static void listen_then_answer(void)
 {
     if (!s_voice_ok || !stt_ready()) {
         ctl(CTL_LISTEN_ENDED);
-        say_error(s_voice_ok ? "Listening needs an ElevenLabs API key in config.json." : "I couldn't start the microphone.");
+        say_error(s_voice_ok ? "My speech model is missing. Flash the full firmware image." : "I couldn't start the microphone.");
         return;
     }
 
@@ -179,11 +179,6 @@ static void listen_then_answer(void)
     ui_set_mode(MODE_THINKING);
 
     char text[1024], msg[128];
-    if (!wifi_wait(10000)) {
-        recorder_free(&rec);
-        say_error("I can't reach the Wi-Fi.");
-        return;
-    }
     err = stt_transcribe(rec.pcm, rec.samples, text, sizeof text, msg, sizeof msg, &s_cancel);
     recorder_free(&rec);
     if (err == ESP_ERR_NOT_FINISHED || s_cancel) {

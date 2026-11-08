@@ -554,6 +554,11 @@ void * picoos_allocate(picoos_MemoryManager this,
 
     c->size = -(c->size);
     adr = (void *)((picoos_objsize_t)c + this->usedCellHdrSize);
+    /* eink_assistant: hand out cleared memory. Pico reads parts of some objects
+       before writing them; on Android those came from fresh, zeroed pages, but a
+       cell reused from the free list still holds an old object's data, pointers
+       included, which made the voice depend on where its memory happened to be. */
+    picoos_mem_set(adr, 0, byteSize);
     return adr;
 }
 

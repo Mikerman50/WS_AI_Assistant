@@ -17,12 +17,9 @@ typedef struct {
     bool claude_web_search;
     char claude_context[APP_CONTEXT_MAX + 1];  // extra notes for Claude about the household
 
-    char elevenlabs_api_key[128];  // speech to text (the voice itself is on the device)
-    char elevenlabs_stt_model[32];
-    char elevenlabs_language[12];  // e.g. "en"; empty = detect automatically
-
-    int listen_max_seconds;  // recording stops and is sent after this long
-    int listen_mic_gain_db;  // ES8311 microphone gain, 0-42 dB
+    int listen_max_seconds;      // recording stops and is transcribed after this long
+    int listen_mic_gain_db;      // ES8311 microphone gain, 0-42 dB
+    bool listen_language_model;  // use models/oido_v2.tlm from the SD card when transcribing
 
     int display_rotation;  // quarter turns, 0-3
     bool display_busy_active_high;

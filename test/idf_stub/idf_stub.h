@@ -34,6 +34,33 @@ int64_t esp_timer_get_time(void);
 void *heap_caps_malloc(size_t size, uint32_t caps);
 void *heap_caps_realloc(void *ptr, size_t size, uint32_t caps);
 void heap_caps_free(void *ptr);
+void *heap_caps_aligned_alloc(size_t alignment, size_t size, uint32_t caps);
+size_t heap_caps_get_free_size(uint32_t caps);
+size_t heap_caps_get_largest_free_block(uint32_t caps);
+#define MALLOC_CAP_INTERNAL (1 << 11)
+
+// ---- esp_partition.h
+typedef enum { ESP_PARTITION_TYPE_APP = 0x00, ESP_PARTITION_TYPE_DATA = 0x01, ESP_PARTITION_TYPE_ANY = 0xff } esp_partition_type_t;
+typedef enum { ESP_PARTITION_SUBTYPE_ANY = 0xff } esp_partition_subtype_t;
+typedef enum { ESP_PARTITION_MMAP_DATA, ESP_PARTITION_MMAP_INST } esp_partition_mmap_memory_t;
+typedef uint32_t esp_partition_mmap_handle_t;
+typedef struct {
+    void *flash_chip;
+    esp_partition_type_t type;
+    esp_partition_subtype_t subtype;
+    uint32_t address;
+    uint32_t size;
+    uint32_t erase_size;
+    char label[17];
+    bool encrypted;
+    bool readonly;
+} esp_partition_t;
+const esp_partition_t *esp_partition_find_first(esp_partition_type_t type, esp_partition_subtype_t subtype,
+                                                const char *label);
+esp_err_t esp_partition_mmap(const esp_partition_t *partition, size_t offset, size_t size,
+                             esp_partition_mmap_memory_t memory, const void **out_ptr,
+                             esp_partition_mmap_handle_t *out_handle);
+void esp_partition_munmap(esp_partition_mmap_handle_t handle);
 
 // ---- esp_idf_version.h
 #define ESP_IDF_VERSION_VAL(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
@@ -68,6 +95,7 @@ BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t wait);
 BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait);
 UBaseType_t uxQueueMessagesWaiting(QueueHandle_t q);
 SemaphoreHandle_t xSemaphoreCreateMutex(void);
+SemaphoreHandle_t xSemaphoreCreateBinary(void);
 BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait);
 BaseType_t xSemaphoreGive(SemaphoreHandle_t s);
 EventGroupHandle_t xEventGroupCreate(void);

@@ -23,7 +23,7 @@
 static const char *TAG = "speaker";
 
 #define PLAY_CHUNK 512                              // samples per write: 32 ms
-#define MAX_CLIP_SAMPLES (AUDIO_SAMPLE_RATE * 25)  // a sentence longer than 25 s is cut short
+#define MAX_CLIP_SAMPLES (AUDIO_SAMPLE_RATE * 15)  // a sentence longer than 15 s is cut short
 #define TTS_TEXT_MAX 1024
 
 typedef enum { ITEM_BEGIN, ITEM_SENTENCE, ITEM_ERROR, ITEM_END } item_kind_t;
@@ -44,7 +44,9 @@ static int s_pending;          // items not yet fully played (atomic)
 // as stopped, so a stop can never leak into the next reply.
 static volatile uint32_t s_reply;
 static volatile uint32_t s_stopped;
-static bool s_voice;  // the voice engine is running
+static bool s_voice;           // speak replies (voice files loaded, codec working, enabled)
+static const void *s_ta, *s_sg;  // the voice files, in PSRAM
+static bool s_engine_on;       // the engine is started for this reply (synthesiser task only)
 static int s_volume = 70, s_speed = 100, s_pitch = 100, s_pace_cps = 15;
 
 // Player state (player task only).
@@ -148,14 +150,34 @@ static void synthesise(item_t *it)
              (double)(esp_timer_get_time() - t0) / 1e6);
 }
 
+// The engine's 1.1 MB of working memory is only taken for the length of a reply,
+// so it's free while the board listens and transcribes.
+static void engine_start(void)
+{
+    if (!s_voice || s_engine_on) return;
+    int64_t t0 = esp_timer_get_time();
+    s_engine_on = picotts_esp_start(s_ta, s_sg);
+    if (s_engine_on) ESP_LOGI(TAG, "voice started in %lld ms", (long long)((esp_timer_get_time() - t0) / 1000));
+    else ESP_LOGE(TAG, "voice didn't start; subtitles only for this reply");
+}
+
+static void engine_stop(void)
+{
+    if (!s_engine_on) return;
+    picotts_esp_stop();
+    s_engine_on = false;
+}
+
 static void synth_task(void *arg)
 {
     (void)arg;
     item_t it;
     for (;;) {
         xQueueReceive(s_in, &it, portMAX_DELAY);
-        if ((it.kind == ITEM_SENTENCE || it.kind == ITEM_ERROR) && s_voice && !stopped(&it)) synthesise(&it);
-        // A short queue: the next sentence or two are made while one plays.
+        if (it.kind == ITEM_BEGIN) engine_start();
+        if ((it.kind == ITEM_SENTENCE || it.kind == ITEM_ERROR) && s_engine_on && !stopped(&it)) synthesise(&it);
+        if (it.kind == ITEM_END) engine_stop();  // what's been made plays on from its own buffers
+        // A short queue: the next sentence is made while one plays.
         xQueueSend(s_ready, &it, portMAX_DELAY);
     }
 }
@@ -300,25 +322,26 @@ static void play_task(void *arg)
     }
 }
 
-void speaker_init(const app_config_t *cfg, bool audio_ok)
+void speaker_init(const app_config_t *cfg, bool audio_ok, const void *voice_ta, const void *voice_sg)
 {
     s_volume = cfg->speech_volume;
     s_speed = cfg->speech_speed;
     s_pitch = cfg->speech_pitch;
     s_pace_cps = cfg->speech_pace_cps;
+    s_ta = voice_ta;
+    s_sg = voice_sg;
     if (!cfg->speech_enabled) {
         ESP_LOGI(TAG, "voice off in config.json; subtitles only");
     } else if (!audio_ok) {
         ESP_LOGW(TAG, "no audio codec; subtitles only");
+    } else if (!voice_ta || !voice_sg) {
+        ESP_LOGW(TAG, "no voice files (models/en-GB_*.bin on the SD card); subtitles only");
     } else {
-        int64_t t0 = esp_timer_get_time();
-        s_voice = picotts_esp_init();
-        if (s_voice) ESP_LOGI(TAG, "voice started in %lld ms", (long long)((esp_timer_get_time() - t0) / 1000));
-        else ESP_LOGE(TAG, "voice didn't start; subtitles only");
+        s_voice = true;
     }
 
     s_in = xQueueCreate(24, sizeof(item_t));
-    s_ready = xQueueCreate(2, sizeof(item_t));
+    s_ready = xQueueCreate(1, sizeof(item_t));
     // The engine is heavy and Wi-Fi lives on core 0, so it gets core 1, below
     // the UI, buttons and network work. The engine itself needs only about 1 KB
     // of stack (measured by test/host/speaker_sim.c); the rest is room for

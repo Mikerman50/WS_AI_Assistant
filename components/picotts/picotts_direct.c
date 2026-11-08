@@ -69,6 +69,9 @@ bool picotts_direct_init(const void *ta, const void *sg, void *mem, size_t mem_s
         return false;            \
     }
     if (s_system) return true;
+    // Pico reads parts of the objects it creates before writing them, so it
+    // needs its memory zeroed (on Android it always got fresh, zeroed pages).
+    memset(mem, 0, mem_size);
     ret = pico_initialize(mem, (pico_Uint32)mem_size, &s_system);
     CHECK("initialise");
     ret = esp_pico_loadResource(s_system, ta, &s_ta);

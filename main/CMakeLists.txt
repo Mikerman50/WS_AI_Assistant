@@ -6,6 +6,7 @@ idf_component_register(
         "recorder.c"
         "stt.c"
         "config_store.c"
+        "sdcard.c"
         "epd_ssd1681.c"
         "ui.c"
         "wifi.c"
@@ -23,8 +24,7 @@ idf_component_register(
         "core/config_parse.c"
         "core/voice_ctl.c"
         "core/audio_level.c"
-        "core/multipart.c"
-        "core/stt_parse.c"
+        "core/asr_text.c"
         "core/tts_text.c"
         "core/fonts/font_caption.c"
         "core/fonts/font_small.c"
@@ -42,5 +42,7 @@ idf_component_register(
         nvs_flash
         fatfs
         sdmmc
+        esp_partition
         picotts
+        oido
 )

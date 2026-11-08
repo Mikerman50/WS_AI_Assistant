@@ -9,7 +9,7 @@ freertos/FreeRTOS.h freertos/task.h freertos/queue.h freertos/semphr.h freertos/
 driver/gpio.h driver/spi_master.h driver/usb_serial_jtag.h driver/usb_serial_jtag_vfs.h
 esp_vfs_usb_serial_jtag.h esp_adc/adc_oneshot.h esp_adc/adc_cali.h esp_adc/adc_cali_scheme.h
 esp_event.h esp_netif.h esp_wifi.h nvs_flash.h nvs.h esp_http_client.h esp_crt_bundle.h
-driver/sdmmc_host.h sdmmc_cmd.h esp_vfs_fat.h driver/i2c_master.h driver/i2s_std.h"
+driver/sdmmc_host.h sdmmc_cmd.h esp_vfs_fat.h driver/i2c_master.h driver/i2s_std.h esp_partition.h"
 
 rm -rf "$gen"
 mkdir -p "$gen"

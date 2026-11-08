@@ -3,15 +3,20 @@
 A fully standalone home assistant: tap BOOT, ask your question out loud, tap
 again, and Claude answers through the board's speaker in a British English
 voice, with subtitles over an expressive 1-bit face whose mouth moves with the
-sound. The board talks straight to Claude's API and to ElevenLabs (for speech to
-text) over Wi-Fi, with no server of your own. All settings come from
+sound. The only service it talks to is Claude's API, so the only key it needs is
+your Anthropic one. There's no server of your own. All settings come from
 `config.json` on the microSD card, so one firmware image works for anyone.
 
-The voice runs entirely on the board: SVOX Pico, the text-to-speech engine
-Android shipped for years, turns each sentence into audio on the ESP32-S3
-itself. Nothing is sent anywhere to be spoken. Listening still uses ElevenLabs,
-because free-form speech recognition doesn't fit in this board's 8 MB of flash
-(see [Speech recognition](#speech-recognition)).
+Everything else runs on the ESP32-S3 itself:
+
+- **Listening:** [Oído](https://github.com/lokutor-ai/oido) by Lokutor, open
+  speech recognition for this chip. Its model is NVIDIA's Conformer-CTC,
+  fine-tuned and cut down to 4 bits. It writes down any sentence, with no
+  command list, and nothing you say leaves the board.
+- **Speaking:** SVOX Pico, the text-to-speech engine Android shipped for years.
+
+Oído's engine is GPLv3, so the firmware is GPLv3 as a whole if you share it
+(see [Licences](#licences)).
 
 ![Face states rendered by the firmware's own drawing code](docs/face-preview.png)
 
@@ -20,12 +25,12 @@ because free-form speech recognition doesn't fit in this board's 8 MB of flash
 | When | BOOT | What happens |
 | --- | --- | --- |
 | Idle | Tap | Starts listening: the face says *Tap BOOT when done*, a meter shows your voice level and the green LED lights |
-| Listening | Tap (a double tap works too) | Finished: it transcribes what you said, shows it as *you: ...*, then Claude answers out loud |
+| Listening | Tap (a double tap works too) | Finished: the board works out what you said, shows it as *you: ...*, then Claude answers out loud |
 | Listening | Hold 1.5 s | Cancels without sending anything |
 | Thinking or answering | Tap | Stops the reply, cutting the voice off mid-word |
 | Idle | Hold 1.5 s | Starts a new conversation (Claude forgets the last few exchanges) |
 
-Recording stops and is sent by itself after `listen.max_seconds` (30 by default).
+Recording stops by itself after `listen.max_seconds` (20 by default).
 Taps within 0.6 s of starting are ignored, as are taps within 0.7 s of finishing,
 so a double tap never starts, stops or interrupts anything twice.
 
@@ -39,14 +44,19 @@ You can also type questions over USB (see below), which skips the microphone.
 ### 1. Prepare the SD card
 
 1. Format a microSD card as **FAT32**.
-2. Copy `sdcard/config.json` to the root of the card.
-3. Edit it: your Wi-Fi name and password, your Anthropic API key, and an
-   ElevenLabs API key for speech to text (see the field reference below). The
-   voice needs no key.
+2. Copy everything in `sdcard/` to the root of the card: `config.json` and the
+   `models` folder. The folder holds the voice (about 1 MB) and the language
+   model for listening (1.3 MB).
+3. Edit `config.json`: your Wi-Fi name and password and your Anthropic API key
+   (see the field reference below).
 4. Put the card in the board.
 
 On Windows, make sure the file is really called `config.json` and not
 `config.json.txt` (the firmware accepts both, but other tools may not).
+
+The board reads the card at start-up and then lets it go, so you can take the
+card out once it's running. Without the `models` folder, replies are shown as
+subtitles only, and listening makes a few more mistakes.
 
 ### 2. Get the firmware image
 
@@ -55,10 +65,13 @@ included workflow (`.github/workflows/build.yml`) builds it with ESP-IDF 5.5.6.
 
 1. Open **Actions → Build firmware → the latest run**.
 2. Download **eink-assistant-firmware** under Artifacts.
-3. Unzip it to get `eink_assistant-merged.bin`, a single image that goes at
-   address 0x0.
+3. Unzip it to get `eink_assistant-merged.bin`, a single 8 MB image that goes
+   at address 0x0. It includes the speech recognition model, which lives in its
+   own part of the flash. The `sdcard` folder next to it is the same as the one
+   in this project.
 
-The image holds no secrets, so the repository can be public.
+The image holds no secrets, so the repository can be public (but see
+[Licences](#licences)).
 
 The same workflow also runs the PC tests and uploads **voice-samples**: WAV
 files of the voice saying a few sentences, so you can hear it before flashing.
@@ -71,6 +84,8 @@ idf.py set-target esp32s3
 idf.py build merge-bin -o eink_assistant-merged.bin   # image lands in build/
 ```
 
+`idf.py flash` also writes the model, so a plain flash works too.
+
 ### 3. Flash it from the browser
 
 1. Plug the board into your computer by USB.
@@ -78,7 +93,8 @@ idf.py build merge-bin -o eink_assistant-merged.bin   # image lands in build/
 3. Click **Connect** and pick the board's USB serial port. If no port appears,
    hold BOOT while plugging the board in.
 4. Under Program, set the flash address to **0x0**, choose
-   `eink_assistant-merged.bin`, and click **Program**.
+   `eink_assistant-merged.bin`, and click **Program**. The whole 8 MB takes a
+   minute or two.
 5. When it finishes, press PWR or replug the board.
 
 From a command line instead:
@@ -101,11 +117,9 @@ the board's USB port, or run `idf.py monitor`. Type a question and press Enter.
 | `claude.max_tokens` | | `300` | Longest reply (16 to 8192) |
 | `claude.web_search` | | `false` | Let Claude search the web for current information; each search is billed |
 | `claude.context` | | `""` | Up to 1000 characters about your home, added to Claude's instructions |
-| `elevenlabs.api_key` | for talking | | ElevenLabs API key, used for speech to text only. Without it, typed questions over USB still work and are answered out loud |
-| `elevenlabs.stt_model` | | `scribe_v2` | ElevenLabs transcription model |
-| `elevenlabs.language` | | `""` | Language you speak, e.g. `"en"`; empty means detect it each time (a fixed language is more accurate) |
-| `listen.max_seconds` | | `30` | Longest recording before it sends by itself (5 to 60) |
+| `listen.max_seconds` | | `20` | Longest recording before it stops by itself (5 to 30) |
 | `listen.mic_gain_db` | | `30` | Microphone gain, 0 to 42 dB, in 6 dB steps |
+| `listen.language_model` | | `true` | Use `models/oido_v2.tlm` to pick between words that sound alike; `false` is a little quicker and a little less accurate |
 | `display.rotation` | | `0` | Quarter turns (0 to 3) if the face is sideways or upside down |
 | `display.busy_active_high` | | `true` | Set to `false` if the log shows a busy timeout on every refresh |
 | `speech.enabled` | | `true` | Speak replies out loud; `false` gives subtitles only |
@@ -116,17 +130,35 @@ the board's USB port, or run `idf.py monitor`. Type a question and press Enter.
 
 A `claude.context` example: `"Our cat is called Biscuit. Use metric units. The kids are 7 and 10."`
 
-Unknown fields are ignored, and `//` or `/* */` comments are tolerated. After a
-successful read, the board keeps a copy of the settings in its own flash, so it
-still starts if you take the card out. Editing `config.json` and restarting
-always takes priority over that copy.
+Unknown fields are ignored (including the `elevenlabs` section from earlier
+versions), and `//` or `/* */` comments are tolerated. After a successful read,
+the board keeps a copy of the settings in its own flash, so it still starts if
+you take the card out. Editing `config.json` and restarting always takes
+priority over that copy.
 
-### Tuning the microphone
+### Listening
 
-Each recording logs a line like `3.2 s recorded, loudest -18 dBFS`. Normal speech
-at arm's length should peak somewhere around -30 to -10. If it's quieter than
-about -40 (or transcripts come back empty), raise `listen.mic_gain_db` by 6; if
-it's close to 0, lower it.
+When you tap to finish, the board turns the recording's speech to a standard
+level and runs Oído over all of it, which is more accurate than transcribing as
+you go. The log shows a line like
+`3.2 s of speech transcribed in 1.9 s (level x2.7): "What's the weather like tomorrow"`.
+How long that takes on this board hasn't been timed yet. Lokutor's ESP32-S3
+runs this model faster than real time in its streaming mode, which suggests a
+second or two for a typical question.
+
+It writes what it hears in lower case without punctuation, and the board tidies
+that up a little. Claude is told the words come from speech recognition and may
+contain misheard words, and asks if something doesn't make sense. Upstream's
+measurements for this model, with the language model, are about 6 words in 100
+wrong on clean read speech and 14 in 100 on harder speech. In a PC test with the
+board's own voice asking eight questions, it got about 9 words in 10 right at
+normal and loud levels. It's English only.
+
+Each recording logs a line like `3.2 s recorded, loudest -18 dBFS`. Normal
+speech at arm's length should peak somewhere around -30 to -10. The level is
+evened out before recognition, but background hiss isn't, so speak within a
+metre or two. If recordings are quieter than about -40, raise
+`listen.mic_gain_db` by 6; if they're close to 0, lower it.
 
 ### The voice
 
@@ -160,12 +192,13 @@ then press BOOT* in the bottom band. BOOT restarts and re-reads the card.
 | *field* is missing from / empty in config.json. | Fill in that field |
 | Replace the example values in config.json. | The sample placeholders are still there |
 | No Wi-Fi: check config.json (bottom band) | The board can't join the network; check the name and password |
-| Add an ElevenLabs key to talk (bottom band) | Add `elevenlabs.api_key`; typed questions still work and are answered out loud |
+| No speech model: reflash (bottom band) | The flash doesn't hold the recognition model; flash the full merged image at 0x0 |
+| No voice files: subtitles only (bottom band) | Copy the `models` folder to the card |
 
 Problems while talking are spoken and shown as subtitles with the sorry face,
-for example *Sorry, I didn't catch that*, *ElevenLabs didn't accept the API key*
-or *I couldn't start the microphone*. If the voice itself can't start (the log
-says why), replies fall back to subtitles only.
+for example *Sorry, I didn't catch that* or *I couldn't start the microphone*.
+If the voice itself can't start (the log says why), replies fall back to
+subtitles only.
 
 ## Console commands
 
@@ -183,7 +216,7 @@ Over the USB serial monitor:
 ## How it fits together
 
 ```
-BOOT taps -> voice_ctl -> assistant -> recorder (ES8311 mic) -> stt (ElevenLabs) -> claude (streamed)
+BOOT taps -> voice_ctl -> assistant -> recorder (ES8311 mic) -> stt (Oído, core 1) -> claude (streamed)
           -> speaker: synth task (Pico, core 1) -> player task (ES8311 speaker + subtitles) -> ui -> epd
 ```
 
@@ -193,44 +226,35 @@ BOOT taps -> voice_ctl -> assistant -> recorder (ES8311 mic) -> stt (ElevenLabs)
 | `main/core/voice_ctl.*` | What each BOOT tap or hold means in each state, including the double-tap guards |
 | `main/audio.*` | ES8311 codec and I2S, set up like XiaoZhi's support for this board, via Espressif's `esp_codec_dev`; microphone and speaker share it, and the amplifier is only on while speaking |
 | `main/recorder.*` | Records 16 kHz mono into PSRAM with a live level meter |
-| `main/stt.*`, `core/stt_parse.*`, `core/multipart.*` | Uploads the recording to ElevenLabs and reads the transcript |
+| `main/stt.*`, `core/asr_text.*`, `core/audio_level.*` | Evens out the recording's level, runs Oído on its own task, tidies the text |
+| `components/oido/` | Oído's engine (GPLv3) and its 5.9 MB model, which the build writes to the `asr` flash partition |
 | `main/claude.*`, `claude_prompt.h` | Streaming Claude client, conversation history, the system prompt |
 | `main/speaker.*`, `core/tts_text.*` | Speaks each sentence with the on-device voice while the next is made; subtitles timed to the audio, mouth from its loudness, stopping mid-word |
-| `components/picotts/` | SVOX Pico with its British English voice (about 1 MB, embedded in the firmware), adapted from DiUS's esp-picotts |
-| `main/config_store.*`, `core/config_parse.*` | Reads `config.json` from the SD card, keeps a saved copy in flash |
+| `components/picotts/` | SVOX Pico, adapted from DiUS's esp-picotts, with fixes for memory bugs that only show off Android |
+| `main/sdcard.*`, `main/config_store.*`, `core/config_parse.*` | Reads `config.json` and the `models` folder from the card, keeps a copy of the settings in flash |
 | `main/board.*` | Pins, power latch, buttons, LED, battery reading, shared I2C bus |
 | `main/epd_ssd1681.c`, `main/ui.*` | Panel driver (full and partial refresh) and the task that owns the screen |
-| `main/core/` | Portable C, also built on a PC for the tests: face, graphics, fonts, captions, sentence streaming, SSE parsing, settings, level meter |
+| `main/core/` | Portable C, also built on a PC for the tests: face, graphics, fonts, captions, sentence streaming, SSE parsing, settings, levels |
 
 Pins and power switches were checked against XiaoZhi's support for this exact
 board, and the e-paper commands against XiaoZhi's and GxEPD2's drivers for this
 panel.
 
-## Speech recognition
+### Memory
 
-Speaking happens on the board, but working out what you said still goes to
-ElevenLabs. Open models that can take free-form dictation on an ESP32-S3 need
-more flash than this board has: the smallest practical one (Oído, a 13M
-parameter Conformer) needs 8 to 14 MB of model data and a 16 MB-flash board,
-and runs at about half real time even there. The options are:
-
-- **Keep ElevenLabs for listening** (as now): accurate, any sentence, about a
-  second per question, billed by audio length.
-- **Fixed phrases on the board** with Espressif's ESP-SR MultiNet: up to 200
-  commands written as English text ("what's the time", "good night"), fully
-  offline, but it can't take arbitrary questions for Claude.
-- **Free-form recognition from the SD card**: port Oído so its model streams
-  from the microSD card. Untried; expect it to take two to three times as long
-  as you spoke, and its engine is GPLv3, which would make the whole firmware
-  GPLv3.
-- **A 16 MB board** (ESP32-S3 N16R8) for Oído in flash.
+The 8 MB of flash holds the firmware (a 2.25 MB slot, no second slot for
+updates over the air) and the 5.9 MB speech model, read in place. The 8 MB of
+PSRAM holds the voice and language model files from the card (2.3 MB) and the
+language model's search state (0.75 MB), plus, only while they're needed, the
+recording and the recogniser's working memory (up to about 3 MB for 30 s) or
+the voice engine's 1.1 MB while a reply is spoken. The voice engine is stopped
+between replies, so the two never need their memory at the same time.
 
 ## Roadmap
 
-1. **Speech recognition**: one of the options above.
-2. **Live transcripts.** Stream audio to ElevenLabs' realtime transcription while
-   you speak, so the *you: ...* strip fills in as you talk.
-3. **Tools and power.**
+1. **Transcripts while you speak.** Oído also has a streaming mode, which would
+   fill in the *you: ...* strip as you talk, at some cost in accuracy.
+2. **Tools and power.**
    - Claude tools for timers on the PCF85063 RTC, room readings from the SHTC3,
      pinning notes, lists and QR codes, and searching a conversation log on the
      SD card.
@@ -239,16 +263,19 @@ and runs at about half real time even there. The options are:
 ## Tests
 
 ```sh
-make -C test/host test      # 335 unit checks with sanitisers (gestures, transcripts, settings, captions...)
-make -C test/host tts       # the voice on a PC: speaks sample sentences into test/host/build/voice_*.wav
-make -C test/host embed     # builds components/picotts through its CMakeLists.txt and speaks
-                            # from the embedded voice data (needs cmake)
-make -C test/host speaker   # runs main/speaker.c with the real voice on stand-ins for FreeRTOS,
-                            # the codec and the screen: order, timing, stopping mid-word, fallbacks
-make -C test/host preview   # renders every face state to test/host/build/*.pbm
-./test/idf_stub/check.sh    # compiles all firmware files without ESP-IDF, twice:
-                            # as GNU C, and as strict C with the ESP32-S3's 32-bit integer
-                            # types to catch printf mistakes that only fail on the real toolchain
+make -C test/host test        # 320 unit checks with sanitisers (gestures, settings, captions, levels...)
+make -C test/host tts         # the voice on a PC: speaks sample sentences into test/host/build/voice_*.wav,
+                              # and checks it's bit-for-bit repeatable wherever its memory is
+make -C test/host asr         # listening end to end: the voice asks questions at three levels, the
+                              # firmware's level adjustment and Oído transcribe them, word errors counted
+make -C test/host speaker     # runs main/speaker.c with the real voice on stand-ins for FreeRTOS,
+                              # the codec and the screen: order, timing, stopping mid-word, fallbacks
+make -C test/host components  # builds components/picotts and components/oido through their own
+                              # CMakeLists.txt, and checks the model fits its partition (needs cmake)
+make -C test/host preview     # renders every face state to test/host/build/*.pbm
+./test/idf_stub/check.sh      # compiles all firmware files without ESP-IDF, twice:
+                              # as GNU C, and as strict C with the ESP32-S3's 32-bit integer
+                              # types to catch printf mistakes that only fail on the real toolchain
 ```
 
 `tools/make_font.py` regenerates the bitmap fonts at other sizes.
@@ -256,23 +283,34 @@ make -C test/host preview   # renders every face state to test/host/build/*.pbm
 ships as its `json` component. `test/idf_stub/esp_codec_dev` holds the headers of
 esp_codec_dev 1.6.2 (Apache-2.0). Both are only used for the PC checks.
 
+## Licences
+
+- **Oído's engine** (`components/oido`, GPLv3) is linked into the firmware, so
+  the firmware as a whole is under the GPLv3 if you give it to anyone else:
+  share its source under the same licence. For your own use there are no
+  obligations.
+- **Speech model** (`components/oido/model/oido_v2b.tnm`): CC-BY-SA-4.0, by
+  Lokutor from NVIDIA's NeMo model. **Language model**
+  (`sdcard/models/oido_v2.tlm`): CC-BY-4.0, by Lokutor.
+- **Voice:** SVOX Pico (Apache-2.0, `components/picotts/pico/lib/NOTICE`) by way
+  of DiUS's esp-picotts (Apache-2.0).
+- **Fonts:** rendered from DejaVu Sans Bold (Bitstream Vera licence with
+  public-domain changes).
+
 ## Notes
 
 - This code hasn't yet been compiled for the board by ESP-IDF; the first real
   build is the GitHub workflow. Every ESP-IDF and esp_codec_dev function and
   setting it uses has been checked against their actual sources (ESP-IDF 5.5.6,
-  esp_codec_dev 1.6.2). The voice engine, its embedding and the text it's given
-  are tested on a PC with the same code the firmware runs.
-- The voice needs about 1.1 MB of PSRAM while running, and its data adds 1 MB
-  to the firmware, which should come to roughly 2.5 MB of the 3 MB app slot.
-  The workflow prints the real figure (`idf.py size`), and the build stops with
-  a clear message if it ever doesn't fit.
-- Recordings go to ElevenLabs over HTTPS for transcription and aren't stored on
-  the device. ElevenLabs bills transcription by audio length.
-- `config.json` holds your API keys in plain text on the card. Keep the card at
-  home, and set spend limits for both keys.
-- Fonts are rendered from DejaVu Sans Bold (Bitstream Vera licence with
-  public-domain changes).
-- The voice is SVOX Pico (Apache-2.0, `components/picotts/pico/lib/NOTICE`) by
-  way of DiUS's esp-picotts (Apache-2.0); see `components/picotts/README.md` for
-  what was changed.
+  esp_codec_dev 1.6.2). Both engines, and the code around them, are tested on a
+  PC with the same C the firmware runs; Oído's ESP32-S3 vector kernels are the
+  ones Lokutor measured on their boards.
+- The app slot is 2.25 MB; the firmware should come to about 1.7 MB. The
+  workflow prints the real figure (`idf.py size`), and the build stops with a
+  clear message if the firmware or the model doesn't fit.
+- Lokutor saw brownouts on some boards when both cores ran heavy vector code at
+  once. The firmware runs the recogniser on one core, as Lokutor's own firmware
+  does. If the board ever resets while working out what you said, that's the
+  first thing to look at.
+- `config.json` holds your Anthropic key in plain text on the card. Keep the
+  card at home, and set a spend limit for the key.

@@ -2,8 +2,9 @@
 #   make test      run the unit tests
 #   make preview   render the face states to build/*.pbm
 #   make tts       speak sample sentences with the on-device voice into build/voice_*.wav
-#   make embed     build the voice component through its CMakeLists.txt (needs cmake)
+#   make asr       listening end to end: the voice's speech -> level -> Oido -> text, word errors
 #   make speaker   run main/speaker.c with the real voice on stand-ins for FreeRTOS and the hardware
+#   make components  build components/picotts and components/oido through their CMakeLists.txt (needs cmake)
 
 CC ?= cc
 CORE_DIR := ../../main/core
@@ -15,8 +16,14 @@ PICO_DIR := ../../components/picotts
 PICO_LIB := $(filter-out $(PICO_DIR)/pico/lib/picorsrc.c,$(wildcard $(PICO_DIR)/pico/lib/*.c))
 # The engine is third-party C: build it as the firmware does, without the strict warnings.
 PICO_CFLAGS := -std=gnu11 -O2 -w -I$(PICO_DIR)/pico/lib -I$(PICO_DIR)/include -I$(PICO_DIR)
+MODELS := ../../sdcard/models
 
-all: build/tests build/preview build/tts_sample build/speaker_sim
+OIDO_DIR := ../../components/oido
+OIDO_SRC := $(addprefix $(OIDO_DIR)/,tinyasr.c kernels.c tinyasr_lm.c tasr_nemo.c tasr_seg.c)
+# As upstream builds it for a PC: same flags as on the board, portable C kernels.
+OIDO_CFLAGS := -std=c11 -D_DEFAULT_SOURCE -O2 -ffp-contract=off -w -I$(OIDO_DIR)/include -I$(OIDO_DIR)
+
+all: build/tests build/preview build/tts_sample build/speaker_sim build/asr_loop
 
 build:
 	mkdir -p build
@@ -40,6 +47,16 @@ build/pico.a: $(PICO_LIB) $(PICO_DIR)/esp_picorsrc.c | build
 	$(CC) $(PICO_CFLAGS) -c -o build/pico/esp_picorsrc.o $(PICO_DIR)/esp_picorsrc.c
 	ar rcs $@ build/pico/*.o
 
+build/oido.a: $(OIDO_SRC) | build
+	rm -rf build/oido && mkdir -p build/oido
+	for f in $(OIDO_SRC); do $(CC) $(OIDO_CFLAGS) -c -o build/oido/$$(basename $$f .c).o $$f || exit 1; done
+	ar rcs $@ build/oido/*.o
+
+build/asr_loop: asr_loop.c build/oido.a build/pico.a $(PICO_DIR)/picotts_direct.c $(CORE) | build
+	$(CC) -std=gnu11 -Wall -Wextra -Werror -g -O1 -I$(CORE_DIR) -I$(PICO_DIR)/include -I$(PICO_DIR)/pico/lib -I$(PICO_DIR) \
+		-I$(OIDO_DIR)/include -I$(OIDO_DIR) -o $@ asr_loop.c $(PICO_DIR)/picotts_direct.c \
+		$(CORE_DIR)/tts_text.c $(CORE_DIR)/utf8.c $(CORE_DIR)/asr_text.c $(CORE_DIR)/audio_level.c build/oido.a build/pico.a -lm
+
 build/tts_sample: tts_sample.c $(PICO_DIR)/picotts_direct.c $(CORE_DIR)/tts_text.c $(CORE_DIR)/utf8.c build/pico.a | build
 	$(CC) -std=gnu11 -Wall -Wextra -Werror -g -O1 -I$(CORE_DIR) -I$(PICO_DIR)/include -I$(PICO_DIR)/pico/lib -I$(PICO_DIR) \
 		-o $@ tts_sample.c $(PICO_DIR)/picotts_direct.c $(CORE_DIR)/tts_text.c $(CORE_DIR)/utf8.c build/pico.a -lm
@@ -48,7 +65,10 @@ test: build/tests
 	./build/tests
 
 tts: build/tts_sample
-	./build/tts_sample build
+	./build/tts_sample build $(MODELS)
+
+asr: build/asr_loop
+	./build/asr_loop $(MODELS) $(OIDO_DIR)/model/oido_v2b.tnm
 
 preview: build/preview
 	./build/preview build
@@ -65,17 +85,17 @@ build/speaker_sim: speaker_sim.c ../../main/speaker.c $(CORE) $(PICO_DIR)/picott
 	$(CC) $(SIM_CFLAGS) -o $@ speaker_sim.c ../../main/speaker.c $(CORE) $(PICO_DIR)/picotts_direct.c \
 		build/pico.a build/cJSON_plain.o -lm
 
-VOICE_FILES := $(PICO_DIR)/pico/lang/en-GB_ta.bin $(PICO_DIR)/pico/lang/en-GB_kh0_sg.bin
+VOICE_FILES := $(MODELS)/en-GB_ta.bin $(MODELS)/en-GB_kh0_sg.bin
 speaker: build/speaker_sim
 	./build/speaker_sim voice $(VOICE_FILES)
 	./build/speaker_sim novoice $(VOICE_FILES)
 
-embed:
-	cmake -S voice_embed -B build/voice_embed >/dev/null
-	cmake --build build/voice_embed
-	./build/voice_embed/voice_embed
+components:
+	cmake -S components_build -B build/components_build >/dev/null
+	cmake --build build/components_build
+	./build/components_build/components_check $(MODELS)
 
 clean:
 	rm -rf build
 
-.PHONY: all test preview tts embed speaker clean
+.PHONY: all test preview tts asr speaker components clean

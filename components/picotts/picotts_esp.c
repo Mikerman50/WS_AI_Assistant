@@ -9,10 +9,6 @@
 
 static const char *TAG = "picotts";
 
-// The voice files, embedded by voice_data.S.
-extern const uint8_t picotts_ta[];
-extern const uint8_t picotts_sg[];
-
 static void *s_mem;
 static TickType_t s_last_pause;
 
@@ -28,20 +24,29 @@ static void pause_now_and_then(void)
     }
 }
 
-bool picotts_esp_init(void)
+bool picotts_esp_start(const void *ta, const void *sg)
 {
     if (s_mem) return true;
+    if (!ta || !sg) return false;
     s_mem = heap_caps_malloc(PICOTTS_MEM_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_mem) {
-        ESP_LOGE(TAG, "not enough PSRAM for the voice");
+        ESP_LOGE(TAG, "not enough PSRAM for the voice (%u bytes free)",
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
         return false;
     }
-    if (!picotts_direct_init(picotts_ta, picotts_sg, s_mem, PICOTTS_MEM_SIZE)) {
+    if (!picotts_direct_init(ta, sg, s_mem, PICOTTS_MEM_SIZE)) {
         heap_caps_free(s_mem);
         s_mem = NULL;
         return false;
     }
     picotts_direct_set_yield(pause_now_and_then);
-    ESP_LOGI(TAG, "voice ready (en-GB)");
     return true;
+}
+
+void picotts_esp_stop(void)
+{
+    if (!s_mem) return;
+    picotts_direct_shutdown();
+    heap_caps_free(s_mem);
+    s_mem = NULL;
 }

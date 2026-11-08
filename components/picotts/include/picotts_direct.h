@@ -3,7 +3,7 @@
 // they are produced, returning when the text is fully spoken.
 //
 // Portable C (no ESP-IDF), so the same code runs in the PC tests. The ESP-IDF
-// glue (resources embedded in flash, memory in PSRAM) is in picotts_esp.h.
+// glue (memory in PSRAM, started and stopped on demand) is in picotts_esp.h.
 #pragma once
 
 #include <stdbool.h>

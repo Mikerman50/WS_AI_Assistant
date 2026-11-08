@@ -226,12 +226,31 @@ static void *load(const char *path)
     return buf;
 }
 
-bool picotts_esp_init(void)
+// As on the board: the engine's memory is taken when a reply starts and given
+// back when it ends. Counted, so the test can check that happens once each.
+static int g_engine_starts, g_engine_stops;
+static bool g_engine_on;
+static char *g_engine_mem;
+
+bool picotts_esp_start(const void *ta, const void *sg)
 {
-    static char *mem;
-    if (mem) return true;
-    mem = malloc(PICOTTS_MEM_SIZE);
-    return picotts_direct_init(load(g_ta_path), load(g_sg_path), mem, PICOTTS_MEM_SIZE);
+    if (g_engine_on) return true;
+    g_engine_mem = malloc(PICOTTS_MEM_SIZE);
+    memset(g_engine_mem, 0xA5, PICOTTS_MEM_SIZE);  // heap memory isn't zeroed on the board either
+    if (!picotts_direct_init(ta, sg, g_engine_mem, PICOTTS_MEM_SIZE)) return false;
+    g_engine_on = true;
+    g_engine_starts++;
+    return true;
+}
+
+void picotts_esp_stop(void)
+{
+    if (!g_engine_on) return;
+    picotts_direct_shutdown();
+    free(g_engine_mem);
+    g_engine_mem = NULL;
+    g_engine_on = false;
+    g_engine_stops++;
 }
 
 // ---------------------------------------------------------------- the speaker stand-in
@@ -397,7 +416,7 @@ static bool contains(const char *hay, const char *needle)
 static void scenario_reply(void)
 {
     reset_observations();
-    int opens = g_opens, closes = g_closes;
+    int opens = g_opens, closes = g_closes, starts = g_engine_starts, stops = g_engine_stops;
     uint32_t t0 = sim_ms();
     speaker_begin_reply();
     speaker_say("Hello! I'm Claude, living in a very small screen.", "happy");
@@ -419,6 +438,8 @@ static void scenario_reply(void)
     CHECK(g_mode == MODE_IDLE && g_expr == EXPR_CURIOUS);
     CHECK(strcmp(g_pinned, "Anything else?") == 0);
     CHECK(g_full_refreshes == 1);
+    // The voice engine ran for this reply only, and its memory is free again.
+    CHECK(g_engine_starts == starts + 1 && g_engine_stops == stops + 1 && !g_engine_on);
 }
 
 static void scenario_stop(void)
@@ -508,7 +529,7 @@ static void scenario_voice_off(void)
     uint32_t starts[64];
     uint32_t expect = captions_estimate("Subtitles only, at the configured pace.", 15.0f, starts, 64);
     printf("voice off: %u ms (pace estimate %u ms)\n", took, expect);
-    CHECK(g_opens == 0 && g_played == 0);
+    CHECK(g_opens == 0 && g_played == 0 && g_engine_starts == 0);
     CHECK(contains(g_captions, "Subtitles only"));
     CHECK(took >= expect && took < expect + 3000);
     CHECK(g_mode == MODE_IDLE && g_full_refreshes == 1);
@@ -559,7 +580,7 @@ int main(int argc, char **argv)
     config_set_defaults(&cfg);
     cfg.speech_enabled = voice;
     cfg.speech_volume = 65;
-    speaker_init(&cfg, true);
+    speaker_init(&cfg, true, load(g_ta_path), load(g_sg_path));
     CHECK(speaker_has_voice() == voice);
 
     if (voice) {

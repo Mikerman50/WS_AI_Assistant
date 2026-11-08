@@ -1170,10 +1170,12 @@ static picoos_uint8 pamHasToProcess(register picodata_ProcessingUnit this)
     /*conditions originating a "NOT to be processed" result */
     nCond1 = pam->nCurrSyllable <= -1;
     nCond2 = pam->nCurrSyllable >= pam->nTotalSyllables;
+    if ((nCond1) || (nCond2)) /* eink_assistant: don't read sSyllFeats out of range */
+        return FALSE;
     nCond3 = pam->nSyllPhoneme
             >= pam->sSyllFeats[pam->nCurrSyllable].phoneV[B3];
 
-    if ((nCond1) || (nCond2) || (nCond3))
+    if (nCond3)
         return FALSE;
 
     return TRUE;
@@ -3949,7 +3951,8 @@ static pico_status_t pam_process_event_feature(
                                 = pam->sSyllFeats[pam->nCurrSyllable].phoneV[H1];
                     if (event_type == PICOPAM_EVENT_P_BOUND)
                         pam->h1_current_secondary_phrase_syll
-                                = pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[H1];
+                                = pam->nCurrSyllable > 0 /* eink_assistant: nothing before the first syllable */
+                                ? pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[H1] : 0;
                     break;
             }
             break;
@@ -3986,7 +3989,8 @@ static pico_status_t pam_process_event_feature(
                                 = pam->sSyllFeats[pam->nCurrSyllable].phoneV[H2];
                     if (event_type == PICOPAM_EVENT_P_BOUND)
                         pam->h2_current_secondary_phrase_word
-                                = pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[H2];
+                                = pam->nCurrSyllable > 0 /* eink_assistant: nothing before the first syllable */
+                                ? pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[H2] : 0;
                     break;
             }
             break;
@@ -4076,7 +4080,8 @@ static pico_status_t pam_process_event_feature(
                     if (event_type == PICOPAM_EVENT_P_BOUND) {
                         pam->i1_next_secondary_phrase_syllable = 0;
                         pam->i1_secondary_phrase_syllable
-                                = pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[I1];
+                                = pam->nCurrSyllable > 0 /* eink_assistant: nothing before the first syllable */
+                                ? pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[I1] : 0;
                     }
                     break;
             }
@@ -4110,7 +4115,8 @@ static pico_status_t pam_process_event_feature(
                     if (event_type == PICOPAM_EVENT_P_BOUND) {
                         pam->i2_next_secondary_phrase_word = 0;
                         pam->i2_secondary_phrase_word
-                                = pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[I2];
+                                = pam->nCurrSyllable > 0 /* eink_assistant: nothing before the first syllable */
+                                ? pam->sSyllFeats[pam->nCurrSyllable - 1].phoneV[I2] : 0;
                     }
                     break;
             }

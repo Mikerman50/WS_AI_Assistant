@@ -116,7 +116,7 @@ static double say(const char *name, const char *text, int speed, int pitch, cons
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : ".";
-    const char *lang = argc > 2 ? argv[2] : "../../components/picotts/pico/lang";
+    const char *lang = argc > 2 ? argv[2] : "../../sdcard/models";
     char ta_path[512], sg_path[512];
     snprintf(ta_path, sizeof ta_path, "%s/en-GB_ta.bin", lang);
     snprintf(sg_path, sizeof sg_path, "%s/en-GB_kh0_sg.bin", lang);
@@ -146,8 +146,37 @@ int main(int argc, char **argv)
     free(c.pcm);
     say("after", "Still working after being interrupted.", 100, 100, dir, false);
 
+    // The voice comes out bit for bit the same wherever the engine's memory is,
+    // as on the board, where it's started again in different memory for each
+    // reply. Two sentences each, so the second one uses memory the first one
+    // left behind. (The engine keeps some state between sentences, so the same
+    // sentence twice in a row isn't identical; across engines it must be.)
+    const char *a = "What should I make for dinner tonight? Something warm, I think.";
+    const char *b = "It's ten past seven; the bins go out on Thursday.";
+    picotts_direct_shutdown();
+    clip_t a1 = {0}, b1 = {0}, a2 = {0}, b2 = {0};
+    if (!picotts_direct_init(ta, sg, mem, PICOTTS_MEM_SIZE)) g_fail++;
+    picotts_direct_say(a, sink, &a1);
+    picotts_direct_say(b, sink, &b1);
+    picotts_direct_shutdown();
+    char *mem2 = malloc(PICOTTS_MEM_SIZE + 4096 + 48);
+    memset(mem2, 0xA5, PICOTTS_MEM_SIZE + 4096 + 48);  // not zero, as heap memory wouldn't be
+    if (!picotts_direct_init(ta, sg, mem2 + 4096 + 48, PICOTTS_MEM_SIZE)) g_fail++;
+    picotts_direct_say(a, sink, &a2);
+    picotts_direct_say(b, sink, &b2);
+    bool same = a1.n == a2.n && b1.n == b2.n && a1.n > 0 && b1.n > 0 &&
+                memcmp(a1.pcm, a2.pcm, a1.n * sizeof(int16_t)) == 0 &&
+                memcmp(b1.pcm, b2.pcm, b1.n * sizeof(int16_t)) == 0;
+    printf("repeat     %s\n", same ? "identical in different memory" : "DIFFERENT in different memory");
+    if (!same) g_fail++;
+    free(a1.pcm);
+    free(b1.pcm);
+    free(a2.pcm);
+    free(b2.pcm);
+
     picotts_direct_shutdown();
     free(mem);
+    free(mem2);
     printf("%s\n", g_fail ? "TTS CHECK FAILED" : "tts ok");
     return g_fail ? 1 : 0;
 }

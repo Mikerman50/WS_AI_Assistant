@@ -13,9 +13,9 @@ void config_set_defaults(app_config_t *c)
     snprintf(c->claude_model, sizeof c->claude_model, "%s", "claude-haiku-5-5");
     c->claude_max_tokens = 300;
     c->claude_web_search = false;
-    snprintf(c->elevenlabs_stt_model, sizeof c->elevenlabs_stt_model, "%s", "scribe_v2");
-    c->listen_max_seconds = 30;
+    c->listen_max_seconds = 20;
     c->listen_mic_gain_db = 30;
+    c->listen_language_model = true;
     c->display_rotation = 0;
     c->display_busy_active_high = true;
     c->speech_enabled = true;
@@ -165,14 +165,12 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
     get_bool(&x, claude, "claude", "web_search", &c->claude_web_search);
     get_str(&x, claude, "claude", "context", c->claude_context, sizeof c->claude_context, false);
 
-    const cJSON *el = section(&x, root, "elevenlabs");
-    get_str(&x, el, "elevenlabs", "api_key", c->elevenlabs_api_key, sizeof c->elevenlabs_api_key, false);
-    get_str(&x, el, "elevenlabs", "stt_model", c->elevenlabs_stt_model, sizeof c->elevenlabs_stt_model, false);
-    get_str(&x, el, "elevenlabs", "language", c->elevenlabs_language, sizeof c->elevenlabs_language, false);
-
+    // An "elevenlabs" section from older versions is ignored, like any unknown one:
+    // listening happens on the board now.
     const cJSON *listen = section(&x, root, "listen");
-    get_int(&x, listen, "listen", "max_seconds", &c->listen_max_seconds, 5, 60);
+    get_int(&x, listen, "listen", "max_seconds", &c->listen_max_seconds, 5, 30);
     get_int(&x, listen, "listen", "mic_gain_db", &c->listen_mic_gain_db, 0, 42);
+    get_bool(&x, listen, "listen", "language_model", &c->listen_language_model);
 
     const cJSON *display = section(&x, root, "display");
     get_int(&x, display, "display", "rotation", &c->display_rotation, 0, 3);
@@ -193,9 +191,5 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
         fail(&x, "wifi.password must be at least 8 characters.");
     if (!x.failed && c->claude_model[0] == '\0')
         snprintf(c->claude_model, sizeof c->claude_model, "%s", "claude-haiku-5-5");
-    if (!x.failed && c->elevenlabs_stt_model[0] == '\0')
-        snprintf(c->elevenlabs_stt_model, sizeof c->elevenlabs_stt_model, "%s", "scribe_v2");
-    // Listening is optional: an untouched placeholder just means "no ElevenLabs key yet".
-    if (strncmp(c->elevenlabs_api_key, "YOUR_", 5) == 0) c->elevenlabs_api_key[0] = '\0';
     return !x.failed;
 }
