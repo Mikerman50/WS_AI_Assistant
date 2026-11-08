@@ -8,6 +8,7 @@
     "model": "claude-haiku-5-5",
     "max_tokens": 300,
     "web_search": false,
+    "personality": "friendly",
     "context": ""
   },
   "listen": {

@@ -16,6 +16,7 @@ typedef struct {
     int claude_max_tokens;
     bool claude_web_search;
     char claude_context[APP_CONTEXT_MAX + 1];  // extra notes for Claude about the household
+    char claude_personality[301];              // a name from claude_prompt.h, or a description
 
     int listen_max_seconds;      // recording stops and is transcribed after this long
     int listen_mic_gain_db;      // ES8311 microphone gain, 0-42 dB

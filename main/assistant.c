@@ -15,6 +15,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "memory.h"
 #include "recorder.h"
 #include "speaker.h"
 #include "stt.h"
@@ -139,6 +140,7 @@ static void answer(const char *question)
     }
     if (err[0] && !s_cancel) speaker_error(err);
     speaker_end_reply();
+    memory_save();  // anything it chose to remember goes on the card
 }
 
 static void listen_then_answer(void)

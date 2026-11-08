@@ -13,6 +13,7 @@ void config_set_defaults(app_config_t *c)
     snprintf(c->claude_model, sizeof c->claude_model, "%s", "claude-haiku-5-5");
     c->claude_max_tokens = 300;
     c->claude_web_search = false;
+    snprintf(c->claude_personality, sizeof c->claude_personality, "%s", "friendly");
     c->listen_max_seconds = 20;
     c->listen_mic_gain_db = 30;
     c->listen_language_model = true;
@@ -164,6 +165,7 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
     get_int(&x, claude, "claude", "max_tokens", &c->claude_max_tokens, 16, 8192);
     get_bool(&x, claude, "claude", "web_search", &c->claude_web_search);
     get_str(&x, claude, "claude", "context", c->claude_context, sizeof c->claude_context, false);
+    get_str(&x, claude, "claude", "personality", c->claude_personality, sizeof c->claude_personality, false);
 
     // An "elevenlabs" section from older versions is ignored, like any unknown one:
     // listening happens on the board now.
@@ -189,6 +191,8 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
         fail(&x, "Replace the example values in config.json.");
     if (!x.failed && c->wifi_password[0] && strlen(c->wifi_password) < 8)
         fail(&x, "wifi.password must be at least 8 characters.");
+    if (!x.failed && c->claude_personality[0] == '\0')
+        snprintf(c->claude_personality, sizeof c->claude_personality, "%s", "friendly");
     if (!x.failed && c->claude_model[0] == '\0')
         snprintf(c->claude_model, sizeof c->claude_model, "%s", "claude-haiku-5-5");
     return !x.failed;

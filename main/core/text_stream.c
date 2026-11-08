@@ -145,8 +145,39 @@ static void abandon_cue(text_stream_t *t)
     t->cue_len = 0;
 }
 
+static void end_note(text_stream_t *t)
+{
+    int n = t->note_len, s = 0;
+    while (n > 0 && t->note[n - 1] == ' ') n--;
+    while (s < n && t->note[s] == ' ') s++;
+    t->note[n] = '\0';
+    if (n > s && t->on_note) t->on_note(t->note + s, t->ctx);
+    t->in_note = false;
+    t->note_len = 0;
+}
+
 static void process(text_stream_t *t, uint32_t cp)
 {
+    if (t->in_note) {  // everything up to the closing brace is the note
+        if (cp == '}') {
+            end_note(t);
+            return;
+        }
+        if (cp == '\n' || cp == '\r' || cp == '\t') cp = ' ';
+        char enc[4];
+        int k = utf8_put(enc, cp);
+        if (t->note_len + k < TS_NOTE_MAX) {
+            memcpy(t->note + t->note_len, enc, (size_t)k);
+            t->note_len += k;
+        }
+        return;
+    }
+    if (cp == '{') {
+        if (t->in_cue) abandon_cue(t);
+        t->in_note = true;
+        t->note_len = 0;
+        return;
+    }
     if (is_dropped(cp)) return;
 
     if (t->in_cue) {
@@ -208,6 +239,7 @@ void ts_feed(text_stream_t *t, const char *data, size_t n)
 
 void ts_finish(text_stream_t *t)
 {
+    if (t->in_note) end_note(t);  // cut off mid-note: still a note, never spoken
     if (t->in_cue) abandon_cue(t);
     t->pending_end = false;
     t->u8_need = 0;

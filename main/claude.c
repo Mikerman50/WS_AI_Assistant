@@ -1,5 +1,6 @@
 #include "claude.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,6 +13,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "memory.h"
 #include "sse.h"
 #include "text_stream.h"
 
@@ -37,7 +39,7 @@ static char s_api_key[200];
 static char s_model[64];
 static int s_max_tokens = 300;
 static bool s_web_search;
-static char *s_system;  // system prompt plus the household context
+static char *s_system;  // system prompt, personality and household context (memory is added per request)
 
 typedef struct {
     text_stream_t ts;
@@ -95,6 +97,18 @@ void claude_forget(void)
     s_forget = true;
 }
 
+// Case-insensitive match, ignoring spaces around `a` ("Butler " is "butler").
+static bool same_word(const char *a, const char *b)
+{
+    while (*a == ' ') a++;
+    while (*a && *b && tolower((unsigned char)*a) == *b) {
+        a++;
+        b++;
+    }
+    while (*a == ' ') a++;
+    return *a == '\0' && *b == '\0';
+}
+
 void claude_init(const app_config_t *cfg)
 {
     // Keep JSON trees out of internal RAM, which Wi-Fi and TLS need.
@@ -106,15 +120,25 @@ void claude_init(const app_config_t *cfg)
     s_max_tokens = cfg->claude_max_tokens;
     s_web_search = cfg->claude_web_search;
 
-    // The base prompt plus whatever the household wrote about itself in config.json.
-    static const char about[] = "\nAbout this household (from the owner):\n";
-    size_t n = sizeof CLAUDE_SYSTEM_PROMPT + sizeof about + strlen(cfg->claude_context) + 1;
+    // The base prompt, the personality, and whatever the household wrote about
+    // itself in config.json.
+    static const struct {
+        const char *name, *text;
+    } k_personalities[] = {CLAUDE_PERSONALITIES};
+    const char *persona = cfg->claude_personality;
+    for (size_t i = 0; i < sizeof k_personalities / sizeof k_personalities[0]; i++)
+        if (same_word(persona, k_personalities[i].name)) persona = k_personalities[i].text;
+    static const char style[] = "\nYour personality (keep to it in every reply): ";
+    static const char about[] = "\n\nAbout this household (from the owner):\n";
+    size_t n = sizeof CLAUDE_SYSTEM_PROMPT + sizeof style + strlen(persona) + sizeof about +
+               strlen(cfg->claude_context) + 1;
     s_system = ps_malloc(n);
     if (s_system) {
-        snprintf(s_system, n, "%s%s%s", CLAUDE_SYSTEM_PROMPT, cfg->claude_context[0] ? about : "",
-                 cfg->claude_context);
+        snprintf(s_system, n, "%s%s%s%s%s", CLAUDE_SYSTEM_PROMPT, style, persona,
+                 cfg->claude_context[0] ? about : "", cfg->claude_context);
     }
-    ESP_LOGI(TAG, "model %s, web search %s", s_model, s_web_search ? "on" : "off");
+    ESP_LOGI(TAG, "model %s, web search %s, personality: %s", s_model, s_web_search ? "on" : "off",
+             cfg->claude_personality);
 }
 
 static void reply_append(stream_t *st, const char *s)
@@ -138,6 +162,12 @@ static void on_sentence(const char *sentence, const char *cue, void *ctx)
     stream_t *st = ctx;
     ESP_LOGI(TAG, "[%s] %s", cue, sentence);
     if (st->on_sentence) st->on_sentence(sentence, cue, st->ctx);
+}
+
+static void on_note(const char *note, void *ctx)
+{
+    (void)ctx;
+    memory_note(note);
 }
 
 static void on_event(const char *event, const char *data, void *ctx)
@@ -185,7 +215,16 @@ static char *build_body(const char *question)
     cJSON_AddStringToObject(root, "model", s_model);
     cJSON_AddNumberToObject(root, "max_tokens", s_max_tokens);
     cJSON_AddBoolToObject(root, "stream", 1);
-    cJSON_AddStringToObject(root, "system", s_system ? s_system : CLAUDE_SYSTEM_PROMPT);
+    // What it remembers changes as it learns, so it's added to each request.
+    const char *mem = memory_text();
+    static const char mem_head[] = "\n\nWhat you remember (your memory file):\n";
+    static const char mem_none[] = "\n\nWhat you remember: nothing yet.\n";
+    const char *base = s_system ? s_system : CLAUDE_SYSTEM_PROMPT;
+    size_t sn = strlen(base) + sizeof mem_head + strlen(mem) + 1;
+    char *sys = ps_malloc(sn);
+    if (sys) snprintf(sys, sn, "%s%s%s", base, mem[0] ? mem_head : mem_none, mem);
+    cJSON_AddStringToObject(root, "system", sys ? sys : base);
+    free(sys);
     if (s_web_search) {
         cJSON *tools = cJSON_AddArrayToObject(root, "tools");
         cJSON *search = cJSON_CreateObject();
@@ -262,6 +301,7 @@ esp_err_t claude_ask(const char *question, claude_sentence_cb_t cb, void *ctx, v
     st->on_sentence = cb;
     st->ctx = ctx;
     ts_init(&st->ts, on_sentence, st);
+    st->ts.on_note = on_note;
     sse_ok = sse_init(&sse, SSE_MAX, on_event, st);
     if (!sse_ok) {
         snprintf(err, errsz, "I ran out of memory.");

@@ -7,6 +7,7 @@
 #include <math.h>
 
 #include "asr_text.h"
+#include "memory_text.h"
 #include "audio_level.h"
 #include "captions.h"
 #include "config_parse.h"
@@ -115,7 +116,16 @@ typedef struct {
     int n;
     char s[32][256];
     char cue[32][24];
+    int notes;
+    char note[4][TS_NOTE_MAX];
 } ts_log_t;
+
+static void on_note(const char *note, void *ctx)
+{
+    ts_log_t *log = ctx;
+    if (log->notes < 4) snprintf(log->note[log->notes], sizeof log->note[0], "%s", note);
+    log->notes++;
+}
 
 static void on_sentence(const char *sentence, const char *cue, void *ctx)
 {
@@ -132,6 +142,7 @@ static ts_log_t run_ts(const char *text, size_t chunk)
     memset(&log, 0, sizeof log);
     text_stream_t t;
     ts_init(&t, on_sentence, &log);
+    t.on_note = on_note;
     size_t len = strlen(text);
     for (size_t i = 0; i < len; i += chunk) ts_feed(&t, text + i, (len - i) < chunk ? (len - i) : chunk);
     ts_finish(&t);
@@ -141,6 +152,22 @@ static ts_log_t run_ts(const char *text, size_t chunk)
 static void test_text_stream(void)
 {
     for (size_t chunk = 1; chunk <= 9; chunk += 4) {
+        // Memory notes in braces are taken out of what's spoken.
+        ts_log_t m = run_ts("[happy] Nice to meet you, Mike! {remember: Mike takes his tea black, no sugar.} "
+                            "Shall I put the kettle on?{ forget:old address }",
+                            chunk);
+        CHECK(m.n == 2);
+        CHECK_STR(m.s[0], "Nice to meet you, Mike!");
+        CHECK_STR(m.cue[0], "happy");
+        CHECK_STR(m.s[1], "Shall I put the kettle on?");
+        CHECK(m.notes == 2);
+        CHECK_STR(m.note[0], "remember: Mike takes his tea black, no sugar.");
+        CHECK_STR(m.note[1], "forget:old address");
+        ts_log_t u = run_ts("All done. {remember: cut off half", chunk);  // a reply cut short mid-note
+        CHECK(u.n == 1 && u.notes == 1);
+        CHECK_STR(u.s[0], "All done.");
+        CHECK_STR(u.note[0], "remember: cut off half");
+
         ts_log_t a = run_ts("[amused] Ha, that's a good one! Penguins can't fly, but they swim brilliantly.", chunk);
         CHECK(a.n == 2);
         CHECK_STR(a.s[0], "Ha, that's a good one!");
@@ -344,6 +371,7 @@ static void test_config(void)
     CHECK(c.display_rotation == 0 && c.display_busy_active_high && c.speech_pace_cps == 15);
     CHECK_STR(c.claude_context, "");
     CHECK(c.listen_max_seconds == 20 && c.listen_mic_gain_db == 30 && c.listen_language_model);
+    CHECK_STR(c.claude_personality, "friendly");
     CHECK(c.speech_enabled && c.speech_volume == 70 && c.speech_speed == 100 && c.speech_pitch == 100);
 
     // Every field set. (The elevenlabs section is left over from an older version
@@ -352,7 +380,7 @@ static void test_config(void)
         "{\n"
         "  \"wifi\": {\"ssid\": \"Caf\xC3\xA9 net\", \"password\": \"\"},\n"
         "  \"claude\": {\"api_key\": \"sk-ant-xyz\", \"model\": \"claude-sonnet-5-5\", \"max_tokens\": 500,\n"
-        "             \"web_search\": true, \"context\": \"Our cat is called Biscuit.\"},\n"
+        "             \"web_search\": true, \"context\": \"Our cat is called Biscuit.\", \"personality\": \"butler\"},\n"
         "  \"elevenlabs\": {\"api_key\": \"el-key\", \"voice_id\": \"v123\", \"stt_model\": \"scribe_v1\",\n"
         "                 \"language\": \"en\"},\n"
         "  \"listen\": {\"max_seconds\": 25, \"mic_gain_db\": 36, \"language_model\": false},\n"
@@ -367,6 +395,7 @@ static void test_config(void)
     CHECK_STR(c.claude_model, "claude-sonnet-5-5");
     CHECK(c.claude_max_tokens == 500 && c.claude_web_search);
     CHECK_STR(c.claude_context, "Our cat is called Biscuit.");
+    CHECK_STR(c.claude_personality, "butler");
     CHECK(c.listen_max_seconds == 25 && c.listen_mic_gain_db == 36 && !c.listen_language_model);
     CHECK(c.display_rotation == 2 && !c.display_busy_active_high && c.speech_pace_cps == 18);
     CHECK(!c.speech_enabled && c.speech_volume == 40 && c.speech_speed == 120 && c.speech_pitch == 90);
@@ -585,6 +614,47 @@ static void test_asr_tidy(void)
     CHECK(asr_tidy("x", out, 0) == 0);
 }
 
+static void test_memory(void)
+{
+    static memory_t m;
+    memory_load(&m, "- Mike takes his tea black\r\n\n  - Sam is 7  \nfree text the owner wrote\n");
+    CHECK_STR(m.text, "- Mike takes his tea black\n- Sam is 7\nfree text the owner wrote\n");
+    CHECK(memory_remember(&m, "The cat is called Biscuit."));
+    CHECK(!memory_remember(&m, "the cat is called biscuit"));  // already known
+    CHECK(!memory_remember(&m, "  "));
+    CHECK_STR(m.text, "- Mike takes his tea black\n- Sam is 7\nfree text the owner wrote\n- The cat is called Biscuit.\n");
+    CHECK(memory_forget(&m, "BISCUIT") == 1);
+    CHECK(memory_forget(&m, "zz") == 0);  // too short to trust
+    CHECK(memory_forget(&m, "nothing like that") == 0);
+    CHECK_STR(m.text, "- Mike takes his tea black\n- Sam is 7\nfree text the owner wrote\n");
+
+    const char *arg;
+    CHECK(memory_parse_note("remember: Sam's birthday is 3 May", &arg) == NOTE_REMEMBER);
+    CHECK_STR(arg, "Sam's birthday is 3 May");
+    CHECK(memory_parse_note(" Forget :old phone number", &arg) == NOTE_FORGET);
+    CHECK_STR(arg, "old phone number");
+    CHECK(memory_parse_note("rememberance of things", &arg) == NOTE_OTHER);
+
+    // Full: the oldest lines make way, whole lines only.
+    memory_load(&m, "");
+    char fact[64];
+    for (int i = 0; i < 400; i++) {
+        snprintf(fact, sizeof fact, "fact number %d is worth keeping", i);
+        memory_remember(&m, fact);
+    }
+    CHECK(m.len <= MEMORY_MAX && m.len > MEMORY_MAX - 64);
+    CHECK(strncmp(m.text, "- fact number ", 14) == 0);
+    CHECK(strstr(m.text, "fact number 399 ") != NULL && strstr(m.text, "fact number 0 ") == NULL);
+    // A long file loads its newest lines.
+    char *big = malloc(20000);
+    big[0] = '\0';
+    for (int i = 0; i < 500; i++) snprintf(big + strlen(big), 20000 - strlen(big), "- line %d of a long memory file\n", i);
+    memory_load(&m, big);
+    free(big);
+    CHECK(strstr(m.text, "- line 499 ") != NULL && strstr(m.text, "- line 0 ") == NULL);
+    CHECK(m.text[m.len - 1] == '\n');
+}
+
 static void test_utf8_truncate(void)
 {
     const char *s = "ab\xC3\xA9\xE2\x82\xAC";  // a b é €
@@ -654,6 +724,7 @@ int main(void)
     test_utf8_truncate();
     test_tts_prepare();
     test_asr_tidy();
+    test_memory();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

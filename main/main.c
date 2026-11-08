@@ -17,6 +17,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "memory.h"
 #include "nvs_flash.h"
 #include "sdcard.h"
 #include "speaker.h"
@@ -36,7 +37,10 @@ static size_t s_lm_len;
 
 static void load_models(void)
 {
-    if (sdcard_mount() != SDCARD_OK) return;
+    if (sdcard_mount() != SDCARD_OK) {
+        memory_init();  // starts empty; saved to the card when it's back
+        return;
+    }
     size_t len;
     if (s_cfg.speech_enabled) {
         s_voice_ta = sdcard_load(MODELS_DIR "/en-GB_ta.bin", 2 * 1024 * 1024, &len);
@@ -48,6 +52,7 @@ static void load_models(void)
         }
     }
     if (s_cfg.listen_language_model) s_lm = sdcard_load(MODELS_DIR "/oido_v2.tlm", 4 * 1024 * 1024, &s_lm_len);
+    memory_init();
     sdcard_unmount();
 }
 
@@ -107,6 +112,7 @@ void app_main(void)
     ui_set_pinned(src == CFG_FROM_SAVED ? "No SD card: saved settings" : "Connecting\xE2\x80\xA6");
     wifi_start(s_cfg.wifi_ssid, s_cfg.wifi_password);
     if (src == CFG_FROM_SD) load_models();  // a second or two, while Wi-Fi connects
+    else memory_init();
     claude_init(&s_cfg);  // also points cJSON at PSRAM, so it comes before anything else parses JSON
     bool audio_ok = audio_init(board_i2c_bus(), s_cfg.listen_mic_gain_db) == ESP_OK;
     if (!audio_ok) ESP_LOGE(TAG, "audio codec unavailable; typed questions and subtitles still work");

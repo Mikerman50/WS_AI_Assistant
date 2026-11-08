@@ -116,6 +116,7 @@ the board's USB port, or run `idf.py monitor`. Type a question and press Enter.
 | `claude.model` | | `claude-haiku-5-5` | Haiku is fastest; `claude-sonnet-5-5` is smarter but slower |
 | `claude.max_tokens` | | `300` | Longest reply (16 to 8192) |
 | `claude.web_search` | | `false` | Let Claude search the web for current information; each search is billed |
+| `claude.personality` | | `friendly` | How it talks: `friendly`, `witty`, `calm`, `butler`, `grumpy`, `pirate` or `teacher`, or your own description in up to 300 characters, e.g. `"Dry, laconic and fond of puns"` |
 | `claude.context` | | `""` | Up to 1000 characters about your home, added to Claude's instructions |
 | `listen.max_seconds` | | `20` | Longest recording before it stops by itself (5 to 30) |
 | `listen.mic_gain_db` | | `30` | Microphone gain, 0 to 42 dB, in 6 dB steps |
@@ -135,6 +136,25 @@ versions), and `//` or `/* */` comments are tolerated. After a successful read,
 the board keeps a copy of the settings in its own flash, so it still starts if
 you take the card out. Editing `config.json` and restarting always takes
 priority over that copy.
+
+### Memory
+
+The assistant keeps a memory in `memory.txt` on the SD card: plain text, one
+short fact per line, like `- Mike takes his tea black`. Everything in it is
+given to Claude with every question, so it can answer things like "how do I
+take my tea?" and get to know the household over time.
+
+Claude decides what's worth keeping: names, who's who, likes and dislikes,
+routines, birthdays, how you like it to talk. It saves a fact by putting a note
+in its reply that isn't spoken, and the board writes it to the card when the
+reply has finished. You can also just say "remember that..." or "forget
+that...". The log shows `memory: remembered: ...` each time.
+
+You can read or edit `memory.txt` on a computer whenever you like (keep one
+fact per line), or start it off yourself. It keeps the newest 6 KB, about 100
+facts; older lines make way. Over the console, `/memory` shows it and
+`/forget-memory` empties it. If the card is out, new facts last until the next
+restart.
 
 ### Listening
 
@@ -209,6 +229,7 @@ Over the USB serial monitor:
 - `/pin <text>` puts text in the bottom band
 - `/full` forces a full refresh
 - `/forget` starts a new conversation
+- `/memory` shows what it remembers; `/forget-memory` empties `memory.txt`
 - `/battery` prints the battery voltage
 - `/reload` restarts and re-reads `config.json`
 - `/forget-settings` deletes the copy of the settings saved in flash
@@ -228,7 +249,8 @@ BOOT taps -> voice_ctl -> assistant -> recorder (ES8311 mic) -> stt (Oído, core
 | `main/recorder.*` | Records 16 kHz mono into PSRAM with a live level meter |
 | `main/stt.*`, `core/asr_text.*`, `core/audio_level.*` | Evens out the recording's level, runs Oído on its own task, tidies the text |
 | `components/oido/` | Oído's engine (GPLv3) and its 5.9 MB model, which the build writes to the `asr` flash partition |
-| `main/claude.*`, `claude_prompt.h` | Streaming Claude client, conversation history, the system prompt |
+| `main/claude.*`, `claude_prompt.h` | Streaming Claude client, conversation history, the system prompt and personalities |
+| `main/memory.*`, `core/memory_text.*` | The memory file: loaded at start-up, sent with every question, updated from notes in replies |
 | `main/speaker.*`, `core/tts_text.*` | Speaks each sentence with the on-device voice while the next is made; subtitles timed to the audio, mouth from its loudness, stopping mid-word |
 | `components/picotts/` | SVOX Pico, adapted from DiUS's esp-picotts, with fixes for memory bugs that only show off Android |
 | `main/sdcard.*`, `main/config_store.*`, `core/config_parse.*` | Reads `config.json` and the `models` folder from the card, keeps a copy of the settings in flash |
@@ -263,7 +285,7 @@ between replies, so the two never need their memory at the same time.
 ## Tests
 
 ```sh
-make -C test/host test        # 320 unit checks with sanitisers (gestures, settings, captions, levels...)
+make -C test/host test        # 371 unit checks with sanitisers (gestures, settings, captions, memory...)
 make -C test/host tts         # the voice on a PC: speaks sample sentences into test/host/build/voice_*.wav,
                               # and checks it's bit-for-bit repeatable wherever its memory is
 make -C test/host asr         # listening end to end: the voice asks questions at three levels, the

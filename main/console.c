@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "face.h"
+#include "memory.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ui.h"
@@ -47,6 +48,12 @@ static void handle(char *line)
         ui_set_pinned(arg ? arg : "");
     } else if (strcmp(line, "/full") == 0) {
         ui_full_refresh();
+    } else if (strcmp(line, "/memory") == 0) {
+        const char *mem = memory_text();
+        printf("%s", mem[0] ? mem : "(nothing remembered yet)\n");
+    } else if (strcmp(line, "/forget-memory") == 0) {
+        memory_clear();
+        ESP_LOGI(TAG, "memory.txt emptied");
     } else if (strcmp(line, "/forget") == 0) {
         claude_forget();
         ESP_LOGI(TAG, "next question starts a new conversation");
@@ -59,7 +66,7 @@ static void handle(char *line)
         ESP_LOGI(TAG, "saved copy of the settings deleted; config.json on the card is untouched");
     } else {
         ESP_LOGI(TAG, "type a question, or /say <text>, /face <name>, /mode <name>, /pin <text>, /full, "
-                      "/forget, /battery, /reload, /forget-settings");
+                      "/forget, /memory, /forget-memory, /battery, /reload, /forget-settings");
     }
 }
 
