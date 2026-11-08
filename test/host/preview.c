@@ -69,6 +69,31 @@ int main(int argc, char **argv)
     strcpy(s.pinned, "Rain from 2pm, take a coat");
     face_render(&g, &s);
     save(&g, dir, "4_idle_pinned");
+    // Idle antics: a blink, a glance, moods with their marks, drowsy, asleep.
+    static const struct {
+        const char *name;
+        bool blink;
+        float look;
+        face_expr_t expr;
+        const char *prop;
+    } poses[] = {
+        {"idle_blink", true, 0.5f, EXPR_NEUTRAL, ""},     {"idle_glance", false, 0.1f, EXPR_NEUTRAL, ""},
+        {"idle_curious", false, 0.75f, EXPR_CURIOUS, "?"}, {"idle_thinking", false, 0.5f, EXPR_THINKING, "..."},
+        {"idle_surprised", false, 0.5f, EXPR_SURPRISED, "!"}, {"idle_humming", false, 0.5f, EXPR_HAPPY, "~"},
+        {"idle_drowsy", false, 0.5f, EXPR_SLEEPY, "z"},     {"idle_asleep", true, 0.5f, EXPR_SLEEPY, "z z"},
+    };
+    for (size_t i = 0; i < sizeof poses / sizeof poses[0]; i++) {
+        face_state_init(&s);
+        s.mode = MODE_IDLE;
+        s.blink = poses[i].blink;
+        s.look = poses[i].look;
+        s.expr = poses[i].expr;
+        snprintf(s.prop, sizeof s.prop, "%s", poses[i].prop);
+        strcpy(s.pinned, "Tap BOOT to talk");
+        face_render(&g, &s);
+        save(&g, dir, poses[i].name);
+    }
+
     // The longest status messages wrap onto two lines.
     static const char *const msgs[] = {"Model not flashed: use merged .bin", "No asr partition: flash full .bin",
                                        "No voice files: subtitles only", "Wrong data in model partition"};

@@ -39,6 +39,8 @@ typedef struct {
     char caption[FACE_CAPTION_LINES][FACE_TEXT_MAX];
     int caption_lines;
     char pinned[FACE_TEXT_MAX];  // bottom band while idle/asleep (empty = none)
+    bool blink;   // idle: eyes shut for a moment
+    char prop[8]; // idle: a little mark beside the head, like "?" or "z" ("" = none)
 } face_state_t;
 
 void face_state_init(face_state_t *s);

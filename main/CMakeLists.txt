@@ -27,6 +27,7 @@ idf_component_register(
         "core/audio_level.c"
         "core/asr_text.c"
         "core/memory_text.c"
+        "core/idle.c"
         "core/tts_text.c"
         "core/fonts/font_caption.c"
         "core/fonts/font_small.c"

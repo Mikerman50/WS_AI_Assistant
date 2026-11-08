@@ -121,6 +121,8 @@ the board's USB port, or run `idf.py monitor`. Type a question and press Enter.
 | `listen.max_seconds` | | `20` | Longest recording before it stops by itself (5 to 30) |
 | `listen.mic_gain_db` | | `30` | Microphone gain, 0 to 42 dB, in 6 dB steps |
 | `listen.language_model` | | `true` | Use `models/oido_v2.tlm` to pick between words that sound alike; `false` is a little quicker and a little less accurate |
+| `idle.activity` | | `calm` | What the face does between conversations: `off` (stays still), `calm` (blinks, glances, the occasional mood) or `lively` (more of everything) |
+| `idle.doze_minutes` | | `10` | Gets drowsy after this many minutes with nothing happening, and falls asleep after three times as long (0 = never) |
 | `display.rotation` | | `0` | Quarter turns (0 to 3) if the face is sideways or upside down |
 | `display.busy_active_high` | | `true` | Set to `false` if the log shows a busy timeout on every refresh |
 | `speech.enabled` | | `true` | Speak replies out loud; `false` gives subtitles only |
@@ -136,6 +138,19 @@ versions), and `//` or `/* */` comments are tolerated. After a successful read,
 the board keeps a copy of the settings in its own flash, so it still starts if
 you take the card out. Editing `config.json` and restarting always takes
 priority over that copy.
+
+### Between conversations
+
+The face doesn't just sit there. It blinks, glances around, and now and then
+has a passing mood: a smile, a curious look with a "?", a thoughtful "...", a
+surprised "!" or a happy hum. After `idle.doze_minutes` with nothing happening
+its eyelids get heavy and the odd "z" drifts up; after three times as long it
+falls asleep and the screen stops changing, which rests the panel and the
+battery. A tap on a button, or a reply, wakes it straight back up.
+
+Every change is a partial refresh of the e-ink panel, with a full (flashing)
+refresh every so often to clear ghosting, so a livelier face means a few more
+of those and a little more power. Use `off` if you'd rather it stayed still.
 
 ### Memory
 
@@ -250,6 +265,7 @@ BOOT taps -> voice_ctl -> assistant -> recorder (ES8311 mic) -> stt (Oído, core
 | `main/stt.*`, `core/asr_text.*`, `core/audio_level.*` | Evens out the recording's level, runs Oído on its own task, tidies the text |
 | `components/oido/` | Oído's engine (GPLv3) and its 5.9 MB model, which the build writes to the `asr` flash partition |
 | `main/claude.*`, `claude_prompt.h` | Streaming Claude client, conversation history, the system prompt and personalities |
+| `core/idle.*` | What the face does between conversations: blinks, glances, moods, dozing and sleep |
 | `main/memory.*`, `core/memory_text.*` | The memory file: loaded at start-up, sent with every question, updated from notes in replies |
 | `main/speaker.*`, `core/tts_text.*` | Speaks each sentence with the on-device voice while the next is made; subtitles timed to the audio, mouth from its loudness, stopping mid-word |
 | `components/picotts/` | SVOX Pico, adapted from DiUS's esp-picotts, with fixes for memory bugs that only show off Android |
@@ -285,7 +301,7 @@ between replies, so the two never need their memory at the same time.
 ## Tests
 
 ```sh
-make -C test/host test        # 371 unit checks with sanitisers (gestures, settings, captions, memory...)
+make -C test/host test        # 388 unit checks with sanitisers (gestures, settings, captions, memory, idle...)
 make -C test/host tts         # the voice on a PC: speaks sample sentences into test/host/build/voice_*.wav,
                               # and checks it's bit-for-bit repeatable wherever its memory is
 make -C test/host asr         # listening end to end: the voice asks questions at three levels, the

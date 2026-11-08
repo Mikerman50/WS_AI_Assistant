@@ -180,7 +180,9 @@ void face_render(gfx_t *g, const face_state_t *s)
     const int my = speaking ? ecy + 54 : ecy + 50;
 
     float look = s->look < 0.0f ? 0.0f : (s->look > 1.0f ? 1.0f : s->look);
-    int lx = speaking ? (int)lroundf((look - 0.5f) * 8.0f) : 0;
+    // Reading along while speaking moves the eyes a little; a glance while idle, more.
+    int lx = speaking ? (int)lroundf((look - 0.5f) * 8.0f)
+                      : (s->mode == MODE_IDLE ? (int)lroundf((look - 0.5f) * 28.0f) : 0);
 
     if (s->mode == MODE_ASLEEP) {
         gfx_stroke_quad(g, CX - EYE_DX - 15, ecy + 6, CX - EYE_DX, ecy + 18, CX - EYE_DX + 15, ecy + 6, 5, true);
@@ -189,8 +191,16 @@ void face_render(gfx_t *g, const face_state_t *s)
         gfx_text(g, &font_caption, 150, 50, "z", true);
         gfx_text(g, &font_small, 165, 34, "z", true);
     } else {
-        draw_eye(g, s->expr, CX - EYE_DX, ecy, true, lx);
-        draw_eye(g, s->expr, CX + EYE_DX, ecy, false, lx);
+        if (s->blink && s->mode == MODE_IDLE) {  // shut for a moment: two gentle arcs
+            gfx_stroke_quad(g, CX - EYE_DX - 15 + lx, ecy + 4, CX - EYE_DX + lx, ecy + 12, CX - EYE_DX + 15 + lx,
+                            ecy + 4, 5, true);
+            gfx_stroke_quad(g, CX + EYE_DX - 15 + lx, ecy + 4, CX + EYE_DX + lx, ecy + 12, CX + EYE_DX + 15 + lx,
+                            ecy + 4, 5, true);
+        } else {
+            draw_eye(g, s->expr, CX - EYE_DX, ecy, true, lx);
+            draw_eye(g, s->expr, CX + EYE_DX, ecy, false, lx);
+        }
+        if (s->mode == MODE_IDLE && s->prop[0]) gfx_text(g, &font_caption, 158, 44, s->prop, true);
         if (speaking) {
             float m = s->mouth < 0.0f ? 0.0f : (s->mouth > 1.0f ? 1.0f : s->mouth);
             gfx_fill_ellipse(g, CX, my, 18, 2 + (int)lroundf(m * 12.0f), true);

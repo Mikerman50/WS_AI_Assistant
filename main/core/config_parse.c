@@ -17,6 +17,8 @@ void config_set_defaults(app_config_t *c)
     c->listen_max_seconds = 20;
     c->listen_mic_gain_db = 30;
     c->listen_language_model = true;
+    snprintf(c->idle_activity, sizeof c->idle_activity, "%s", "calm");
+    c->idle_doze_minutes = 10;
     c->display_rotation = 0;
     c->display_busy_active_high = true;
     c->speech_enabled = true;
@@ -173,6 +175,13 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
     get_int(&x, listen, "listen", "max_seconds", &c->listen_max_seconds, 5, 30);
     get_int(&x, listen, "listen", "mic_gain_db", &c->listen_mic_gain_db, 0, 42);
     get_bool(&x, listen, "listen", "language_model", &c->listen_language_model);
+
+    const cJSON *idle = section(&x, root, "idle");
+    get_str(&x, idle, "idle", "activity", c->idle_activity, sizeof c->idle_activity, false);
+    get_int(&x, idle, "idle", "doze_minutes", &c->idle_doze_minutes, 0, 240);
+    if (!x.failed && strcmp(c->idle_activity, "off") && strcmp(c->idle_activity, "calm") &&
+        strcmp(c->idle_activity, "lively"))
+        fail(&x, "idle.activity must be off, calm or lively.");
 
     const cJSON *display = section(&x, root, "display");
     get_int(&x, display, "display", "rotation", &c->display_rotation, 0, 3);

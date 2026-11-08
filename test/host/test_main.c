@@ -8,6 +8,7 @@
 
 #include "asr_text.h"
 #include "memory_text.h"
+#include "idle.h"
 #include "audio_level.h"
 #include "captions.h"
 #include "config_parse.h"
@@ -435,6 +436,8 @@ static void test_config(void)
          "listen.language_model must be true or false."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"listen\": {\"mic_gain_db\": -1}}",
          "listen.mic_gain_db must be 0 to 42."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"idle\": {\"activity\": \"wild\"}}",
+         "idle.activity must be off, calm or lively."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"enabled\": \"yes\"}}",
          "speech.enabled must be true or false."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"volume\": 101}}",
@@ -655,6 +658,83 @@ static void test_memory(void)
     CHECK(m.text[m.len - 1] == '\n');
 }
 
+// Counts what the idle face does over a stretch of time, in 100 ms steps.
+typedef struct {
+    int blinks, glances, moods, changes;
+    bool sleepy, still_at_end;
+    uint32_t longest_blink;
+} idle_log_t;
+
+static idle_log_t run_idle(idle_t *s, uint32_t from, uint32_t to)
+{
+    idle_log_t log = {0};
+    idle_pose_t prev, p;
+    idle_pose(s, from, &prev);
+    uint32_t blink_start = 0, last_change = from;
+    for (uint32_t step = 100; step <= to - from; step += 100) {  // works across a clock wrap too
+        uint32_t t = from + step;
+        idle_pose(s, t, &p);
+        if (p.blink && !prev.blink) {
+            log.blinks++;
+            blink_start = t;
+        }
+        if (!p.blink && prev.blink && t - blink_start > log.longest_blink) log.longest_blink = t - blink_start;
+        if (p.look != 0.5f && prev.look == 0.5f) log.glances++;
+        if (p.expr != EXPR_NEUTRAL && p.expr != EXPR_SLEEPY && prev.expr != p.expr) log.moods++;
+        if (p.expr == EXPR_SLEEPY) log.sleepy = true;
+        if (p.blink != prev.blink || p.look != prev.look || p.expr != prev.expr || strcmp(p.prop, prev.prop)) {
+            log.changes++;
+            last_change = t;
+        }
+        prev = p;
+    }
+    log.still_at_end = to - last_change >= 60000;
+    return log;
+}
+
+static void test_idle(void)
+{
+    CHECK(idle_style_from_name("off") == IDLE_OFF && idle_style_from_name("lively") == IDLE_LIVELY);
+    CHECK(idle_style_from_name("calm") == IDLE_CALM && idle_style_from_name("???") == IDLE_CALM);
+
+    idle_t s;
+    idle_init(&s, IDLE_OFF, 10, 1, 0);
+    idle_log_t off = run_idle(&s, 0, 3600000);
+    CHECK(off.changes == 0);  // never moves
+
+    // Calm, first five minutes: blinks every 7-15 s, the odd glance and mood, no dozing.
+    idle_init(&s, IDLE_CALM, 10, 42, 1000);
+    idle_log_t calm = run_idle(&s, 1000, 301000);
+    CHECK(calm.blinks >= 18 && calm.blinks <= 45);
+    CHECK(calm.longest_blink >= 500 && calm.longest_blink <= 700);
+    CHECK(calm.glances >= 3);
+    CHECK(calm.moods >= 1);
+    CHECK(!calm.sleepy);
+
+    idle_init(&s, IDLE_LIVELY, 10, 42, 1000);
+    idle_log_t lively = run_idle(&s, 1000, 301000);
+    CHECK(lively.blinks > calm.blinks && lively.moods > calm.moods);
+
+    // Drowsy after the doze time, asleep (and still) after three times that.
+    idle_log_t drowsy = run_idle(&s, 601000, 900000);
+    CHECK(drowsy.sleepy);
+    idle_log_t asleep = run_idle(&s, 1900000, 3600000);
+    CHECK(asleep.changes == 0);
+    idle_pose_t p;
+    idle_pose(&s, 3600000, &p);
+    CHECK(p.blink && p.expr == EXPR_SLEEPY && strcmp(p.prop, "z z") == 0);
+
+    // A button or a reply wakes it right up.
+    idle_wake(&s, 3600000);
+    idle_pose(&s, 3600100, &p);
+    CHECK(p.expr != EXPR_SLEEPY && strcmp(p.prop, "z z") != 0);
+
+    // Doze 0: never drowsy. Wraps of the millisecond clock don't confuse it.
+    idle_init(&s, IDLE_CALM, 0, 7, 0xFFFF0000u);
+    idle_log_t awake = run_idle(&s, 0xFFFF0000u, 0xFFFF0000u + 3000000u);
+    CHECK(!awake.sleepy && awake.blinks > 100);
+}
+
 static void test_utf8_truncate(void)
 {
     const char *s = "ab\xC3\xA9\xE2\x82\xAC";  // a b é €
@@ -725,6 +805,7 @@ int main(void)
     test_tts_prepare();
     test_asr_tidy();
     test_memory();
+    test_idle();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

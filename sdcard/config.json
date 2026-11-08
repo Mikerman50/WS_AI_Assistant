@@ -16,6 +16,10 @@
     "mic_gain_db": 30,
     "language_model": true
   },
+  "idle": {
+    "activity": "calm",
+    "doze_minutes": 10
+  },
   "display": {
     "rotation": 0,
     "busy_active_high": true

@@ -25,5 +25,11 @@ void ui_set_level(float level);                 // mic level while listening
 void ui_set_pinned(const char *text);           // bottom band while idle
 void ui_full_refresh(void);
 
+face_mode_t ui_get_mode(void);
+
+// While idle only (ignored otherwise): eyes shut, where they look (0..1), the
+// expression, and a small mark beside the head ("" for none).
+void ui_set_idle_pose(bool blink, float look, face_expr_t expr, const char *prop);
+
 // Waits until everything requested so far is on the panel.
 bool ui_wait_idle(int timeout_ms);

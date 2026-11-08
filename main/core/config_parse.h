@@ -22,6 +22,9 @@ typedef struct {
     int listen_mic_gain_db;      // ES8311 microphone gain, 0-42 dB
     bool listen_language_model;  // use models/oido_v2.tlm from the SD card when transcribing
 
+    char idle_activity[8];  // "off", "calm" or "lively"
+    int idle_doze_minutes;  // drowsy after this long with nothing happening (0 = never)
+
     int display_rotation;  // quarter turns, 0-3
     bool display_busy_active_high;
 

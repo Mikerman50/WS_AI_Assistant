@@ -14,9 +14,12 @@
 #include "console.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "idle.h"
 #include "memory.h"
 #include "nvs_flash.h"
 #include "sdcard.h"
@@ -68,8 +71,39 @@ static void power_off(void)
     ui_set_mode(MODE_IDLE);
 }
 
+// ---- idle antics (see core/idle.h)
+
+static volatile bool s_poked;  // a button was pressed: wide awake again
+
+static uint32_t now_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+static void idle_task(void *arg)
+{
+    (void)arg;
+    static idle_t idle;
+    idle_init(&idle, idle_style_from_name(s_cfg.idle_activity), (uint32_t)s_cfg.idle_doze_minutes, esp_random(),
+              now_ms());
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(200));
+        uint32_t now = now_ms();
+        bool busy = assistant_busy() || speaker_busy() || ui_get_mode() != MODE_IDLE;
+        if (busy || s_poked) {
+            s_poked = false;
+            idle_wake(&idle, now);
+            continue;
+        }
+        idle_pose_t p;
+        idle_pose(&idle, now, &p);
+        ui_set_idle_pose(p.blink, p.look, p.expr, p.prop);
+    }
+}
+
 static void on_button(board_btn_t button, board_btn_event_t event)
 {
+    s_poked = true;
     if (button == BTN_PWR && event == BTN_LONG) {
         power_off();
         return;
@@ -121,6 +155,7 @@ void app_main(void)
     // Last, so the recogniser only borrows internal RAM the rest has left spare.
     stt_init(&s_cfg, s_lm, s_lm_len);
     s_running = true;
+    xTaskCreate(idle_task, "idle", 3072, NULL, 2, NULL);
     ESP_LOGI(TAG, "ready: %u KB of PSRAM and %u KB of internal RAM free",
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));

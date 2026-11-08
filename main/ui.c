@@ -47,12 +47,38 @@ void ui_set_mode(face_mode_t mode)
 {
     lock();
     s_state.mode = mode;
+    s_state.blink = false;  // idle antics stop whenever the mode changes
+    s_state.prop[0] = '\0';
     if (mode != MODE_SPEAKING) {
         s_state.mouth = 0.0f;
         s_state.look = 0.5f;
         s_state.caption_lines = 0;
     }
     if (mode != MODE_LISTENING) s_state.level = 0.0f;
+    unlock_changed();
+}
+
+face_mode_t ui_get_mode(void)
+{
+    lock();
+    face_mode_t m = s_state.mode;
+    xSemaphoreGive(s_lock);
+    return m;
+}
+
+void ui_set_idle_pose(bool blink, float look, face_expr_t expr, const char *prop)
+{
+    lock();
+    if (s_state.mode != MODE_IDLE || expr >= EXPR_COUNT ||
+        (s_state.blink == blink && s_state.look == look && s_state.expr == expr &&
+         strcmp(s_state.prop, prop ? prop : "") == 0)) {
+        xSemaphoreGive(s_lock);
+        return;
+    }
+    s_state.blink = blink;
+    s_state.look = look;
+    s_state.expr = expr;
+    snprintf(s_state.prop, sizeof s_state.prop, "%s", prop ? prop : "");
     unlock_changed();
 }
 
