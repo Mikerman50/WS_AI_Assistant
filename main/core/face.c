@@ -139,6 +139,35 @@ static void band(gfx_t *g, int y, int h, const char *text, int baseline)
     gfx_text(g, &font_small, (GFX_W - w) / 2, baseline, fit, false);
 }
 
+// The bottom band: one line when the text fits, otherwise two (split at the
+// last space that lets the first line fit), so a message is shown whole.
+static void bottom_band(gfx_t *g, const char *text)
+{
+    const int max_w = GFX_W - 12;
+    if (gfx_text_width(&font_small, text) <= max_w) {
+        band(g, GFX_H - 30, 30, text, GFX_H - 10);
+        return;
+    }
+    char first[FACE_TEXT_MAX];
+    int split = -1;
+    for (int i = 0; text[i] && i < FACE_TEXT_MAX - 1; i++)
+        if (text[i] == ' ' && gfx_text_width_n(&font_small, text, i) <= max_w) split = i;
+    if (split < 0) {  // one long word: shrink it to one line with an ellipsis
+        band(g, GFX_H - 30, 30, text, GFX_H - 10);
+        return;
+    }
+    memcpy(first, text, (size_t)split);
+    first[split] = '\0';
+    const int step = 18;  // baseline to baseline
+    gfx_fill_rect(g, 0, GFX_H - 30 - step, GFX_W, 30 + step, true);
+    int w = gfx_text_width(&font_small, first);
+    gfx_text(g, &font_small, (GFX_W - w) / 2, GFX_H - 10 - step, first, false);
+    char rest[FACE_TEXT_MAX + 8];
+    gfx_fit_text(&font_small, text + split + 1, max_w, rest, sizeof rest);
+    w = gfx_text_width(&font_small, rest);
+    gfx_text(g, &font_small, (GFX_W - w) / 2, GFX_H - 10, rest, false);
+}
+
 void face_render(gfx_t *g, const face_state_t *s)
 {
     gfx_clear(g);
@@ -205,5 +234,5 @@ void face_render(gfx_t *g, const face_state_t *s)
     }
 
     if ((s->mode == MODE_IDLE || s->mode == MODE_ASLEEP || notice) && s->pinned[0])
-        band(g, GFX_H - 30, 30, s->pinned, GFX_H - 10);
+        bottom_band(g, s->pinned);
 }

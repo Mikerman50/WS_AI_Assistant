@@ -69,6 +69,16 @@ int main(int argc, char **argv)
     strcpy(s.pinned, "Rain from 2pm, take a coat");
     face_render(&g, &s);
     save(&g, dir, "4_idle_pinned");
+    // The longest status messages wrap onto two lines.
+    static const char *const msgs[] = {"Model not flashed: use merged .bin", "No asr partition: flash full .bin",
+                                       "No voice files: subtitles only", "Wrong data in model partition"};
+    for (int i = 0; i < 4; i++) {
+        char name[32];
+        snprintf(name, sizeof name, "4_idle_long%d", i);
+        snprintf(s.pinned, sizeof s.pinned, "%s", msgs[i]);
+        face_render(&g, &s);
+        save(&g, dir, name);
+    }
 
     face_state_init(&s);
     s.mode = MODE_ASLEEP;
