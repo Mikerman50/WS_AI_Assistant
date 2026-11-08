@@ -7,6 +7,8 @@
 
 #include <stdbool.h>
 
+#include "driver/i2c_master.h"
+
 // E-paper (SSD1681, 200x200, 4-wire SPI)
 #define PIN_EPD_SCK 12
 #define PIN_EPD_MOSI 13
@@ -21,7 +23,7 @@
 #define PIN_I2C_SCL 48
 #define PIN_RTC_INT 5
 
-// Audio: ES8311 codec + NS4150B amplifier (used from milestone 2)
+// Audio: ES8311 codec (microphone in, speaker out) + NS4150B amplifier
 #define PIN_I2S_MCLK 14
 #define PIN_I2S_BCLK 15
 #define PIN_I2S_WS 38
@@ -30,7 +32,7 @@
 #define PIN_AMP_EN 46    // HIGH = amplifier on
 #define PIN_AUDIO_PWR 42 // LOW = codec powered
 
-// microSD, 1-bit SDMMC (used from milestone 4)
+// microSD, 1-bit SDMMC (config.json lives there)
 #define PIN_SD_CLK 39
 #define PIN_SD_CMD 41
 #define PIN_SD_D0 40
@@ -50,7 +52,14 @@ typedef void (*board_btn_cb_t)(board_btn_t button, board_btn_event_t event);
 // PWR button is released unless firmware holds GPIO17 high.
 void board_power_hold(void);
 
+// Sets up power rails, buttons, the battery ADC and the shared I2C bus.
 void board_init(void);
+
+// The I2C bus shared by the RTC, the SHTC3 sensor and the ES8311 codec.
+i2c_master_bus_handle_t board_i2c_bus(void);
+
+// The green LED (lit while listening; it may not be visible through the case).
+void board_led(bool on);
 
 // Releases the power latch. Returns only if the board stays on (USB power).
 void board_power_off(void);

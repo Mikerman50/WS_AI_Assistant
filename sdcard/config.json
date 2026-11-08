@@ -11,14 +11,23 @@
     "context": ""
   },
   "elevenlabs": {
-    "api_key": "",
-    "voice_id": ""
+    "api_key": "YOUR_ELEVENLABS_API_KEY",
+    "stt_model": "scribe_v2",
+    "language": "en"
+  },
+  "listen": {
+    "max_seconds": 30,
+    "mic_gain_db": 30
   },
   "display": {
     "rotation": 0,
     "busy_active_high": true
   },
   "speech": {
+    "enabled": true,
+    "volume": 70,
+    "speed": 100,
+    "pitch": 100,
     "pace_chars_per_sec": 15
   }
 }

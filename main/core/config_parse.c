@@ -13,8 +13,15 @@ void config_set_defaults(app_config_t *c)
     snprintf(c->claude_model, sizeof c->claude_model, "%s", "claude-haiku-5-5");
     c->claude_max_tokens = 300;
     c->claude_web_search = false;
+    snprintf(c->elevenlabs_stt_model, sizeof c->elevenlabs_stt_model, "%s", "scribe_v2");
+    c->listen_max_seconds = 30;
+    c->listen_mic_gain_db = 30;
     c->display_rotation = 0;
     c->display_busy_active_high = true;
+    c->speech_enabled = true;
+    c->speech_volume = 70;
+    c->speech_speed = 100;
+    c->speech_pitch = 100;
     c->speech_pace_cps = 15;
 }
 
@@ -24,7 +31,7 @@ typedef struct {
     bool failed;
 } ctx_t;
 
-static void fail(ctx_t *x, const char *fmt, ...)
+__attribute__((format(printf, 2, 3))) static void fail(ctx_t *x, const char *fmt, ...)
 {
     if (x->failed) return;  // keep the first problem; it is usually the real one
     x->failed = true;
@@ -160,13 +167,22 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
 
     const cJSON *el = section(&x, root, "elevenlabs");
     get_str(&x, el, "elevenlabs", "api_key", c->elevenlabs_api_key, sizeof c->elevenlabs_api_key, false);
-    get_str(&x, el, "elevenlabs", "voice_id", c->elevenlabs_voice_id, sizeof c->elevenlabs_voice_id, false);
+    get_str(&x, el, "elevenlabs", "stt_model", c->elevenlabs_stt_model, sizeof c->elevenlabs_stt_model, false);
+    get_str(&x, el, "elevenlabs", "language", c->elevenlabs_language, sizeof c->elevenlabs_language, false);
+
+    const cJSON *listen = section(&x, root, "listen");
+    get_int(&x, listen, "listen", "max_seconds", &c->listen_max_seconds, 5, 60);
+    get_int(&x, listen, "listen", "mic_gain_db", &c->listen_mic_gain_db, 0, 42);
 
     const cJSON *display = section(&x, root, "display");
     get_int(&x, display, "display", "rotation", &c->display_rotation, 0, 3);
     get_bool(&x, display, "display", "busy_active_high", &c->display_busy_active_high);
 
     const cJSON *speech = section(&x, root, "speech");
+    get_bool(&x, speech, "speech", "enabled", &c->speech_enabled);
+    get_int(&x, speech, "speech", "volume", &c->speech_volume, 0, 100);
+    get_int(&x, speech, "speech", "speed", &c->speech_speed, 50, 200);
+    get_int(&x, speech, "speech", "pitch", &c->speech_pitch, 50, 200);
     get_int(&x, speech, "speech", "pace_chars_per_sec", &c->speech_pace_cps, 5, 40);
 
     cJSON_Delete(root);
@@ -177,5 +193,9 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
         fail(&x, "wifi.password must be at least 8 characters.");
     if (!x.failed && c->claude_model[0] == '\0')
         snprintf(c->claude_model, sizeof c->claude_model, "%s", "claude-haiku-5-5");
+    if (!x.failed && c->elevenlabs_stt_model[0] == '\0')
+        snprintf(c->elevenlabs_stt_model, sizeof c->elevenlabs_stt_model, "%s", "scribe_v2");
+    // Listening is optional: an untouched placeholder just means "no ElevenLabs key yet".
+    if (strncmp(c->elevenlabs_api_key, "YOUR_", 5) == 0) c->elevenlabs_api_key[0] = '\0';
     return !x.failed;
 }

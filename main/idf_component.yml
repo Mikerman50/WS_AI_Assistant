@@ -1,0 +1,5 @@
+## Components fetched from the ESP Component Registry at build time.
+dependencies:
+  idf: ">=5.3"
+  # ES8311 codec driver; the same version XiaoZhi uses on this board.
+  espressif/esp_codec_dev: "~1.6.2"

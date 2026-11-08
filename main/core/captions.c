@@ -171,3 +171,9 @@ float captions_progress(const cap_page_t *p, uint32_t t_ms)
     if (t_ms <= p->start_ms) return 0.0f;
     return (float)(t_ms - p->start_ms) / (float)(p->end_ms - p->start_ms);
 }
+
+void captions_scale(uint32_t *starts, int n, uint32_t estimated_ms, uint32_t actual_ms)
+{
+    if (estimated_ms == 0) return;
+    for (int i = 0; i < n; i++) starts[i] = (uint32_t)((uint64_t)starts[i] * actual_ms / estimated_ms);
+}

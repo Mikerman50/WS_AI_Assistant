@@ -33,7 +33,9 @@ static void handle(char *line)
     char *arg = strchr(line, ' ');
     if (arg) *arg++ = '\0';
 
-    if (strcmp(line, "/face") == 0 && arg) {
+    if (strcmp(line, "/say") == 0 && arg) {
+        assistant_say(arg);
+    } else if (strcmp(line, "/face") == 0 && arg) {
         face_expr_t e = face_expr_from_name(arg);
         if (e < EXPR_COUNT) ui_set_expr(e);
         else ESP_LOGW(TAG, "unknown face \"%s\"", arg);
@@ -56,8 +58,8 @@ static void handle(char *line)
         config_forget_saved();
         ESP_LOGI(TAG, "saved copy of the settings deleted; config.json on the card is untouched");
     } else {
-        ESP_LOGI(TAG, "type a question, or /face <name>, /mode <name>, /pin <text>, /full, /forget, "
-                      "/battery, /reload, /forget-settings");
+        ESP_LOGI(TAG, "type a question, or /say <text>, /face <name>, /mode <name>, /pin <text>, /full, "
+                      "/forget, /battery, /reload, /forget-settings");
     }
 }
 

@@ -17,6 +17,7 @@ static const char *TAG = "board";
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_cali;
 static board_btn_cb_t s_btn_cb;
+static i2c_master_bus_handle_t s_i2c;
 
 void board_power_hold(void)
 {
@@ -40,8 +41,22 @@ void board_init(void)
     ESP_ERROR_CHECK(gpio_config(&out));
     gpio_set_level(PIN_LED, 1);        // LED off
     gpio_set_level(PIN_EPD_PWR, 0);    // panel on
-    gpio_set_level(PIN_AUDIO_PWR, 1);  // codec off until audio is added (milestone 2)
-    gpio_set_level(PIN_AMP_EN, 0);     // amplifier off
+    gpio_set_level(PIN_AUDIO_PWR, 0);  // codec on (it idles at low power until opened)
+    gpio_set_level(PIN_AMP_EN, 0);     // amplifier off until there is something to play
+
+    // Same settings as XiaoZhi's support for this board: port 0, internal pull-ups.
+    i2c_master_bus_config_t bus = {
+        .i2c_port = 0,
+        .sda_io_num = PIN_I2C_SDA,
+        .scl_io_num = PIN_I2C_SCL,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = 1,
+    };
+    if (i2c_new_master_bus(&bus, &s_i2c) != ESP_OK) {
+        ESP_LOGE(TAG, "I2C bus failed to start");
+        s_i2c = NULL;
+    }
 
     gpio_config_t in = {
         .pin_bit_mask = (1ULL << PIN_PWR_KEY) | (1ULL << PIN_BOOT_KEY),
@@ -65,6 +80,16 @@ void board_init(void)
         s_adc = NULL;
     }
     ESP_LOGI(TAG, "battery %d mV", board_battery_mv());
+}
+
+i2c_master_bus_handle_t board_i2c_bus(void)
+{
+    return s_i2c;
+}
+
+void board_led(bool on)
+{
+    gpio_set_level(PIN_LED, on ? 0 : 1);
 }
 
 int board_battery_mv(void)

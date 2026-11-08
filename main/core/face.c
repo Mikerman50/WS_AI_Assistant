@@ -145,7 +145,8 @@ void face_render(gfx_t *g, const face_state_t *s)
 
     const bool speaking = s->mode == MODE_SPEAKING;
     const bool notice = s->mode == MODE_NOTICE;
-    const bool strip = s->heard[0] && (s->mode == MODE_LISTENING || s->mode == MODE_THINKING);
+    // Top band: what it heard, or while listening with nothing heard yet, how to finish.
+    const bool strip = s->mode == MODE_LISTENING || (s->heard[0] && s->mode == MODE_THINKING);
     const int ecy = (speaking || notice) ? 52 : (strip ? 80 : 72);
     const int my = speaking ? ecy + 54 : ecy + 50;
 
@@ -175,8 +176,12 @@ void face_render(gfx_t *g, const face_state_t *s)
 
     if (strip) {
         char line[FACE_TEXT_MAX + 8];
-        strcpy(line, "you: ");
-        strncat(line, s->heard, sizeof line - strlen(line) - 1);
+        if (s->heard[0]) {
+            strcpy(line, "you: ");
+            strncat(line, s->heard, sizeof line - strlen(line) - 1);
+        } else {
+            strcpy(line, "Tap BOOT when done");
+        }
         band(g, 0, 28, line, 19);
     }
 

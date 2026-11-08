@@ -12,3 +12,7 @@ int utf8_put(char *out, uint32_t cp);
 
 // Number of code points in a NUL-terminated string.
 int utf8_count(const char *s);
+
+// Largest length <= n that doesn't cut a multi-byte character in half
+// (`s` must have at least n bytes).
+size_t utf8_truncate(const char *s, size_t n);

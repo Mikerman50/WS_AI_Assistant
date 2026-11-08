@@ -14,7 +14,7 @@
 
 static const char *TAG = "ui";
 
-#define FULL_REFRESH_EVERY 40   // partial refreshes before a cleaning full refresh
+#define FULL_REFRESH_EVERY 120  // partial refreshes before a cleaning full refresh (each reply also ends with one)
 #define PANEL_OFF_AFTER_MS 3000 // switch the charge pump off after this long without changes
 #define EV_IDLE BIT0
 

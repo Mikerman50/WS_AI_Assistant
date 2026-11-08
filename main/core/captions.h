@@ -1,9 +1,10 @@
 // Subtitle pages for one spoken sentence, and their timing.
 //
 // A sentence is word-wrapped into pages of up to N lines. Each page gets a start
-// and end time from per-character timings, either real ones from the TTS service
-// (ElevenLabs returns a start time for every character it speaks) or estimates
-// at a speaking pace. While audio plays, captions_page_at() says which page to show.
+// and end time from per-character timings: estimates at a speaking pace, stretched
+// to the real length of the synthesised audio with captions_scale() (or real
+// per-character times, if a voice ever provides them). While audio plays,
+// captions_page_at() says which page to show.
 #pragma once
 
 #include <stdint.h>
@@ -47,3 +48,7 @@ int captions_page_at(const cap_layout_t *L, uint32_t t_ms);
 
 // How far through page `p` speech has got at `t_ms`, 0..1 (drives the reading eyes).
 float captions_progress(const cap_page_t *p, uint32_t t_ms);
+
+// Stretches estimated character start times (from captions_estimate, which
+// totalled `estimated_ms`) so they span the real audio length instead.
+void captions_scale(uint32_t *starts, int n, uint32_t estimated_ms, uint32_t actual_ms);

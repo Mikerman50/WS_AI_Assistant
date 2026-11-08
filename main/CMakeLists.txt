@@ -2,13 +2,16 @@ idf_component_register(
     SRCS
         "main.c"
         "board.c"
+        "audio.c"
+        "recorder.c"
+        "stt.c"
         "config_store.c"
         "epd_ssd1681.c"
         "ui.c"
         "wifi.c"
         "claude.c"
         "assistant.c"
-        "speaker_paced.c"
+        "speaker.c"
         "console.c"
         "core/utf8.c"
         "core/font.c"
@@ -18,6 +21,11 @@ idf_component_register(
         "core/text_stream.c"
         "core/sse.c"
         "core/config_parse.c"
+        "core/voice_ctl.c"
+        "core/audio_level.c"
+        "core/multipart.c"
+        "core/stt_parse.c"
+        "core/tts_text.c"
         "core/fonts/font_caption.c"
         "core/fonts/font_small.c"
     INCLUDE_DIRS "." "core"
@@ -34,4 +42,5 @@ idf_component_register(
         nvs_flash
         fatfs
         sdmmc
+        picotts
 )

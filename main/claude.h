@@ -1,6 +1,7 @@
 // Streaming client for Claude's Messages API.
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "config_parse.h"
@@ -16,7 +17,8 @@ void claude_init(const app_config_t *cfg);
 // Sends `question` with the recent conversation and streams the reply,
 // calling `on_sentence` as sentences complete. Blocks until the reply is done.
 // On failure returns an error and writes a short, speakable reason to `err`.
-esp_err_t claude_ask(const char *question, claude_sentence_cb_t on_sentence, void *ctx,
+// If *cancel becomes true it stops reading and returns ESP_ERR_NOT_FINISHED.
+esp_err_t claude_ask(const char *question, claude_sentence_cb_t on_sentence, void *ctx, volatile bool *cancel,
                      char *err, size_t errsz);
 
 // Starts a fresh conversation (takes effect before the next question).

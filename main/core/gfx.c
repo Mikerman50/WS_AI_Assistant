@@ -226,20 +226,21 @@ void gfx_fit_text(const font_t *f, const char *s, int max_w, char *out, int outs
         return;
     }
     int ell_w = gfx_text_width(f, ell);
-    int w = 0, n = 0;
+    int w = 0;
+    size_t n = 0;  // bytes of `s` that fit, with room left for the ellipsis
     const char *p = s;
     while (*p) {
         uint32_t cp;
         int k = utf8_next(p, &cp);
         const glyph_t *gl = glyph_or_q(f, cp);
         int a = gl ? gl->adv : 0;
-        if (w + a + ell_w > max_w || n + k + 3 >= outsz) break;
+        if (w + a + ell_w > max_w || n + (size_t)k + 3 >= (size_t)outsz) break;
         w += a;
-        n += k;
+        n += (size_t)k;
         p += k;
     }
     while (n > 0 && s[n - 1] == ' ') n--;
-    memcpy(out, s, (size_t)n);
+    memcpy(out, s, n);
     memcpy(out + n, ell, 3);
     out[n + 3] = '\0';
 }

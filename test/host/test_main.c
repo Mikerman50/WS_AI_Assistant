@@ -4,13 +4,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <math.h>
+
+#include "audio_level.h"
 #include "captions.h"
 #include "config_parse.h"
 #include "face.h"
 #include "gfx.h"
+#include "multipart.h"
 #include "sse.h"
+#include "stt_parse.h"
 #include "text_stream.h"
+#include "tts_text.h"
 #include "utf8.h"
+#include "voice_ctl.h"
 
 static int g_fail, g_pass;
 
@@ -233,6 +240,23 @@ static void test_captions(void)
 
     cap_layout_t E;
     CHECK(captions_layout(&E, "   ", FACE_CAPTION_MAX_W, 3, measure_caption, NULL) == 0);
+
+    // Estimated timings stretched to the real length of the synthesised audio.
+    uint32_t s4[] = {0, 100, 200, 300};
+    captions_scale(s4, 4, 400, 800);
+    CHECK(s4[0] == 0 && s4[1] == 200 && s4[2] == 400 && s4[3] == 600);
+    captions_scale(s4, 4, 0, 1000);  // nothing to scale from: left alone
+    CHECK(s4[3] == 600);
+    uint32_t big[] = {3000000000u};
+    captions_scale(big, 1, 3000000000u, 1000);  // no overflow in the multiply
+    CHECK(big[0] == 1000);
+    total = captions_estimate(text, 15.0f, starts, 256);
+    uint32_t actual = total * 2 / 3;  // the voice was quicker than the estimate
+    captions_scale(starts, L.ncp, total, actual);
+    captions_apply_timing(&L, starts, NULL, L.ncp, actual);
+    CHECK(L.page[L.npages - 1].end_ms == actual);
+    CHECK(captions_page_at(&L, actual) == L.npages - 1);
+    for (int p = 1; p < L.npages; p++) CHECK(L.page[p].start_ms < actual && L.page[p].start_ms > L.page[p - 1].start_ms);
 }
 
 // ---------------------------------------------------------------- graphics
@@ -306,6 +330,7 @@ static void test_config(void)
         CHECK(!parse(sample, &c, err));
         CHECK_STR(err, "Replace the example values in config.json.");
         CHECK(c.claude_max_tokens == 300 && c.display_busy_active_high && c.speech_pace_cps == 15);
+        CHECK(c.speech_enabled && c.speech_volume == 70 && c.speech_speed == 100 && c.speech_pitch == 100);
         free(sample);
     }
 
@@ -319,16 +344,24 @@ static void test_config(void)
     CHECK(c.claude_max_tokens == 300 && !c.claude_web_search);
     CHECK(c.display_rotation == 0 && c.display_busy_active_high && c.speech_pace_cps == 15);
     CHECK_STR(c.claude_context, "");
+    CHECK_STR(c.elevenlabs_stt_model, "scribe_v2");
+    CHECK_STR(c.elevenlabs_language, "");
+    CHECK(c.listen_max_seconds == 30 && c.listen_mic_gain_db == 30);
+    CHECK(c.speech_enabled && c.speech_volume == 70 && c.speech_speed == 100 && c.speech_pitch == 100);
 
-    // Every field set.
+    // Every field set. (elevenlabs.voice_id is left over from an older version
+    // and is ignored, like any unknown setting.)
     const char *full =
         "{\n"
         "  \"wifi\": {\"ssid\": \"Caf\xC3\xA9 net\", \"password\": \"\"},\n"
         "  \"claude\": {\"api_key\": \"sk-ant-xyz\", \"model\": \"claude-sonnet-5-5\", \"max_tokens\": 500,\n"
         "             \"web_search\": true, \"context\": \"Our cat is called Biscuit.\"},\n"
-        "  \"elevenlabs\": {\"api_key\": \"el-key\", \"voice_id\": \"v123\"},\n"
+        "  \"elevenlabs\": {\"api_key\": \"el-key\", \"voice_id\": \"v123\", \"stt_model\": \"scribe_v1\",\n"
+        "                 \"language\": \"en\"},\n"
+        "  \"listen\": {\"max_seconds\": 45, \"mic_gain_db\": 36},\n"
         "  \"display\": {\"rotation\": 2, \"busy_active_high\": false},\n"
-        "  \"speech\": {\"pace_chars_per_sec\": 18},\n"
+        "  \"speech\": {\"enabled\": false, \"volume\": 40, \"speed\": 120, \"pitch\": 90,\n"
+        "             \"pace_chars_per_sec\": 18},\n"
         "  \"something_new\": {\"ignored\": 1}\n"
         "}\n";
     CHECK(parse(full, &c, err));
@@ -338,8 +371,11 @@ static void test_config(void)
     CHECK(c.claude_max_tokens == 500 && c.claude_web_search);
     CHECK_STR(c.claude_context, "Our cat is called Biscuit.");
     CHECK_STR(c.elevenlabs_api_key, "el-key");
-    CHECK_STR(c.elevenlabs_voice_id, "v123");
+    CHECK_STR(c.elevenlabs_stt_model, "scribe_v1");
+    CHECK_STR(c.elevenlabs_language, "en");
+    CHECK(c.listen_max_seconds == 45 && c.listen_mic_gain_db == 36);
     CHECK(c.display_rotation == 2 && !c.display_busy_active_high && c.speech_pace_cps == 18);
+    CHECK(!c.speech_enabled && c.speech_volume == 40 && c.speech_speed == 120 && c.speech_pitch == 90);
 
     // Comments and a Windows byte-order mark are tolerated.
     CHECK(parse("\xEF\xBB\xBF{ // my settings\n \"wifi\": {\"ssid\": \"Home\"}, /* key */\n"
@@ -370,6 +406,18 @@ static void test_config(void)
          "display.rotation must be 0 to 3."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\", \"web_search\": \"yes\"}}",
          "claude.web_search must be true or false."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"listen\": {\"max_seconds\": 90}}",
+         "listen.max_seconds must be 5 to 60."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"listen\": {\"mic_gain_db\": -1}}",
+         "listen.mic_gain_db must be 0 to 42."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"enabled\": \"yes\"}}",
+         "speech.enabled must be true or false."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"volume\": 101}}",
+         "speech.volume must be 0 to 100."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"speed\": 30}}",
+         "speech.speed must be 50 to 200."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"pitch\": 250}}",
+         "speech.pitch must be 50 to 200."},
     };
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         CHECK(!parse(bad[i].json, &c, err));
@@ -379,6 +427,10 @@ static void test_config(void)
 
     // An empty model falls back to the default; an over-long context is refused.
     CHECK(parse("{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\", \"model\": \"\"}}", &c, err));
+    CHECK(parse("{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"},"
+                " \"elevenlabs\": {\"api_key\": \"YOUR_ELEVENLABS_API_KEY\", \"stt_model\": \"\"}}", &c, err));
+    CHECK_STR(c.elevenlabs_api_key, "");
+    CHECK_STR(c.elevenlabs_stt_model, "scribe_v2");
     CHECK_STR(c.claude_model, "claude-haiku-5-5");
     char *big = malloc(APP_CONTEXT_MAX + 200);
     strcpy(big, "{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\", \"context\": \"");
@@ -390,6 +442,223 @@ static void test_config(void)
     free(big);
 }
 
+
+// ---------------------------------------------------------------- BOOT button gestures
+
+static void test_voice_ctl(void)
+{
+    voice_ctl_t v;
+    voice_ctl_init(&v);
+    int64_t t = 10000;
+
+    // Tap to start, tap to finish.
+    CHECK(voice_ctl_button(&v, false, t) == VA_START_LISTENING);
+    CHECK(v.state == VS_LISTENING);
+    CHECK(voice_ctl_button(&v, false, t + 3000) == VA_FINISH_LISTENING);
+    CHECK(v.state == VS_BUSY);
+    // The second tap of a double tap to finish is ignored...
+    CHECK(voice_ctl_button(&v, false, t + 3250) == VA_NONE);
+    CHECK(v.state == VS_BUSY);
+    // ...but a later tap stops the reply.
+    CHECK(voice_ctl_button(&v, false, t + 6000) == VA_INTERRUPT);
+    voice_ctl_idle(&v);
+    // A tap straight after stopping the reply doesn't start listening.
+    CHECK(voice_ctl_button(&v, false, t + 6300) == VA_NONE);
+    CHECK(v.state == VS_IDLE);
+    CHECK(voice_ctl_button(&v, false, t + 7000) == VA_START_LISTENING);
+
+    // A double tap to start doesn't immediately finish.
+    voice_ctl_init(&v);
+    CHECK(voice_ctl_button(&v, false, t) == VA_START_LISTENING);
+    CHECK(voice_ctl_button(&v, false, t + 250) == VA_NONE);
+    CHECK(v.state == VS_LISTENING);
+    CHECK(voice_ctl_button(&v, false, t + VOICE_START_GUARD_MS) == VA_FINISH_LISTENING);
+
+    // Hold while listening cancels; hold when idle starts a new conversation.
+    voice_ctl_init(&v);
+    CHECK(voice_ctl_button(&v, true, t) == VA_NEW_CONVERSATION);
+    CHECK(v.state == VS_IDLE);
+    CHECK(voice_ctl_button(&v, false, t + 100) == VA_START_LISTENING);
+    CHECK(voice_ctl_button(&v, true, t + 2000) == VA_CANCEL_LISTENING);
+    CHECK(v.state == VS_IDLE);
+
+    // Hitting the time limit counts as finishing; a tap that was on its way is ignored.
+    voice_ctl_init(&v);
+    voice_ctl_button(&v, false, t);
+    voice_ctl_listen_ended(&v, t + 30000);
+    CHECK(v.state == VS_BUSY);
+    CHECK(voice_ctl_button(&v, false, t + 30200) == VA_NONE);
+    CHECK(voice_ctl_button(&v, true, t + 30300) == VA_INTERRUPT);  // a hold always stops
+
+    // A typed question makes it busy too, and a tap stops it.
+    voice_ctl_init(&v);
+    voice_ctl_busy(&v);
+    CHECK(voice_ctl_button(&v, false, t) == VA_INTERRUPT);
+    voice_ctl_listen_ended(&v, t);  // ignored when not listening
+    CHECK(v.state == VS_BUSY);
+
+    // The end of a turn doesn't cancel a new turn that has already started listening.
+    voice_ctl_init(&v);
+    voice_ctl_button(&v, false, t);
+    voice_ctl_idle(&v);
+    CHECK(v.state == VS_LISTENING);
+    voice_ctl_busy(&v);  // nor does a typed question
+    CHECK(v.state == VS_LISTENING);
+    voice_ctl_reset(&v);
+    CHECK(v.state == VS_IDLE);
+}
+
+// ---------------------------------------------------------------- mic level
+
+static void test_audio_level(void)
+{
+    static int16_t buf[1600];
+    memset(buf, 0, sizeof buf);
+    CHECK(audio_rms_dbfs(buf, 1600) == -96.0f);
+    CHECK(audio_meter(audio_rms_dbfs(buf, 1600)) == 0.0f);
+    CHECK(audio_peak(buf, 1600) == 0);
+    CHECK(audio_rms_dbfs(buf, 0) == -96.0f);
+
+    for (int i = 0; i < 1600; i++) buf[i] = (int16_t)lround(32767.0 * sin(2 * 3.14159265358979 * 440.0 * i / 16000.0));
+    float full = audio_rms_dbfs(buf, 1600);
+    CHECK(full > -3.2f && full < -2.8f);  // a full-scale sine is -3 dBFS
+    CHECK(audio_meter(full) == 1.0f);
+    CHECK(audio_peak(buf, 1600) == 32767);
+
+    for (int i = 0; i < 1600; i++) buf[i] = (int16_t)(buf[i] / 100);  // 40 dB quieter
+    float quiet = audio_rms_dbfs(buf, 1600);
+    CHECK(quiet > -43.5f && quiet < -42.5f);
+    float m = audio_meter(quiet);
+    CHECK(m > 0.25f && m < 0.35f);
+    buf[7] = -32768;
+    CHECK(audio_peak(buf, 1600) == 32768);
+
+    // The mouth opens with loudness: shut below -45 dBFS, wide open from -15.
+    CHECK(audio_mouth(-96.0f) == 0.0f);
+    CHECK(audio_mouth(-45.0f) == 0.0f);
+    CHECK(fabsf(audio_mouth(-30.0f) - 0.5f) < 1e-5f);
+    CHECK(audio_mouth(-15.0f) == 1.0f);
+    CHECK(audio_mouth(0.0f) == 1.0f);
+    CHECK(audio_mouth(quiet) > 0.0f && audio_mouth(quiet) < 0.1f);  // the -43 dBFS tone: barely open
+}
+
+// ---------------------------------------------------------------- multipart upload framing
+
+static void test_multipart(void)
+{
+    char head[512], tail[64];
+    mp_field_t f[] = {{"model_id", "scribe_v2"}, {"file_format", "pcm_s16le_16"}};
+    int n = multipart_head(head, sizeof head, "B0UNDARY", f, 2, "file", "speech.pcm", "application/octet-stream");
+    CHECK_STR(head,
+              "--B0UNDARY\r\nContent-Disposition: form-data; name=\"model_id\"\r\n\r\nscribe_v2\r\n"
+              "--B0UNDARY\r\nContent-Disposition: form-data; name=\"file_format\"\r\n\r\npcm_s16le_16\r\n"
+              "--B0UNDARY\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.pcm\"\r\n"
+              "Content-Type: application/octet-stream\r\n\r\n");
+    CHECK(n == (int)strlen(head));
+    int k = multipart_tail(tail, sizeof tail, "B0UNDARY");
+    CHECK_STR(tail, "\r\n--B0UNDARY--\r\n");
+    CHECK(k == (int)strlen(tail));
+    CHECK(multipart_head(head, 40, "B0UNDARY", f, 2, "file", "a", "b") == -1);  // too small
+    CHECK(multipart_tail(tail, 8, "B0UNDARY") == -1);
+}
+
+// ---------------------------------------------------------------- transcript parsing
+
+static void test_stt_parse(void)
+{
+    char text[64], err[96];
+
+    const char *ok =
+        "{\"language_code\":\"en\",\"language_probability\":0.98,"
+        "\"text\":\"  Will it rain\\n tomorrow?  \",\"words\":[{\"text\":\"Will\",\"type\":\"word\",\"logprob\":0}]}";
+    CHECK(stt_parse_response(200, ok, text, sizeof text, err, sizeof err) == STT_TEXT);
+    CHECK_STR(text, "Will it rain tomorrow?");
+
+    CHECK(stt_parse_response(200, "{\"text\":\"\"}", text, sizeof text, err, sizeof err) == STT_EMPTY);
+    CHECK(stt_parse_response(200, "{\"text\":\" ... \"}", text, sizeof text, err, sizeof err) == STT_EMPTY);
+    CHECK_STR(text, "");
+    CHECK(stt_parse_response(200, "{\"text\":\"Caf\xC3\xA9\"}", text, sizeof text, err, sizeof err) == STT_TEXT);
+    CHECK_STR(text, "Caf\xC3\xA9");
+
+    // Long transcripts are cut on a character boundary.
+    char small[8];
+    CHECK(stt_parse_response(200, "{\"text\":\"abcd\xC3\xA9\xC3\xA9xyz\"}", small, sizeof small, err, sizeof err) == STT_TEXT);
+    CHECK_STR(small, "abcd\xC3\xA9");
+
+    CHECK(stt_parse_response(200, "not json", text, sizeof text, err, sizeof err) == STT_ERROR);
+    CHECK_STR(err, "ElevenLabs sent an unexpected reply.");
+    CHECK(stt_parse_response(401, "{\"detail\":{\"status\":\"invalid_api_key\",\"message\":\"Invalid API key\"}}",
+                             text, sizeof text, err, sizeof err) == STT_ERROR);
+    CHECK_STR(err, "ElevenLabs didn't accept the API key.");
+    CHECK(stt_parse_response(400, "{\"detail\":{\"status\":\"quota_exceeded\",\"message\":\"...\"}}",
+                             text, sizeof text, err, sizeof err) == STT_ERROR);
+    CHECK_STR(err, "The ElevenLabs account is out of credit.");
+    CHECK(stt_parse_response(422, "{\"detail\":[{\"loc\":[\"body\",\"model_id\"],\"msg\":\"bad\",\"type\":\"x\"}]}",
+                             text, sizeof text, err, sizeof err) == STT_ERROR);
+    CHECK_STR(err, "ElevenLabs couldn't use the recording.");
+    CHECK(stt_parse_response(429, NULL, text, sizeof text, err, sizeof err) == STT_ERROR);
+    CHECK_STR(err, "ElevenLabs is busy. Try again in a moment.");
+    CHECK(stt_parse_response(503, "", text, sizeof text, err, sizeof err) == STT_ERROR);
+    CHECK_STR(err, "Transcription failed (error 503).");
+}
+
+static void test_utf8_truncate(void)
+{
+    const char *s = "ab\xC3\xA9\xE2\x82\xAC";  // a b é €
+    CHECK(utf8_truncate(s, 0) == 0);
+    CHECK(utf8_truncate(s, 2) == 2);
+    CHECK(utf8_truncate(s, 3) == 2);  // would split é
+    CHECK(utf8_truncate(s, 4) == 4);
+    CHECK(utf8_truncate(s, 5) == 4);  // would split €
+    CHECK(utf8_truncate(s, 6) == 4);
+    CHECK(utf8_truncate(s, 7) == 7);
+}
+
+// ---------------------------------------------------------------- text for the voice
+
+static void test_tts_prepare(void)
+{
+    char out[256];
+    CHECK(tts_prepare("Hello there.", 100, 100, out, sizeof out) == strlen("Hello there."));
+    CHECK_STR(out, "Hello there.");
+
+    // Characters Pico would read as markup are replaced.
+    tts_prepare("a<b>c & d", 100, 100, out, sizeof out);
+    CHECK_STR(out, "a b c  and  d");
+    CHECK(strchr(out, '<') == NULL && strchr(out, '>') == NULL && strchr(out, '&') == NULL);
+
+    // Typographic punctuation, line breaks and control characters.
+    tts_prepare("It\xE2\x80\x99s \xE2\x80\x9C" "fine\xE2\x80\x9D\xE2\x80\x94really\xE2\x80\xA6\nOK\x01", 100, 100, out, sizeof out);
+    CHECK_STR(out, "It's \"fine\", really... OK");
+    tts_prepare("Caf\xC3\xA9 \xC2\xA3" "5", 100, 100, out, sizeof out);
+    CHECK_STR(out, "Caf\xC3\xA9 \xC2\xA3" "5");  // other characters pass through
+
+    // Speed and pitch markup, only when they aren't 100%.
+    tts_prepare("Hi.", 120, 90, out, sizeof out);
+    CHECK_STR(out, "<speed level=\"120\"><pitch level=\"90\">Hi.</pitch></speed>");
+    tts_prepare("Hi.", 80, 100, out, sizeof out);
+    CHECK_STR(out, "<speed level=\"80\">Hi.</speed>");
+    tts_prepare("Hi.", 100, 110, out, sizeof out);
+    CHECK_STR(out, "<pitch level=\"110\">Hi.</pitch>");
+
+    // Long text is cut on a character boundary, keeping the closing markup.
+    char small[24];
+    size_t n = tts_prepare("\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9", 100, 100,
+                           small, sizeof small);
+    CHECK(n == 22 && n == strlen(small));
+    CHECK(utf8_truncate(small, n) == n);
+    char tagged[48];
+    n = tts_prepare("A fairly long sentence that won't fit in the space.", 150, 100, tagged, sizeof tagged);
+    CHECK(n == strlen(tagged) && n < sizeof tagged);
+    static const char head[] = "<speed level=\"150\">A fairly";
+    CHECK(strncmp(tagged, head, sizeof head - 1) == 0);
+    CHECK(n >= 8 && strcmp(tagged + n - 8, "</speed>") == 0);
+    // No room for the markup at all: nothing rather than unbalanced tags.
+    CHECK(tts_prepare("Hi.", 150, 100, small, 16) == 0 && small[0] == '\0');
+    CHECK(tts_prepare("", 100, 100, out, sizeof out) == 0 && out[0] == '\0');
+    CHECK(tts_prepare("x", 100, 100, out, 0) == 0);
+}
+
 int main(void)
 {
     test_sse();
@@ -397,6 +666,12 @@ int main(void)
     test_captions();
     test_gfx();
     test_config();
+    test_voice_ctl();
+    test_audio_level();
+    test_multipart();
+    test_stt_parse();
+    test_utf8_truncate();
+    test_tts_prepare();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

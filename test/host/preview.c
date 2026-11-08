@@ -44,8 +44,7 @@ int main(int argc, char **argv)
 
     face_state_init(&s);
     s.mode = MODE_LISTENING;
-    s.level = 0.75f;
-    strcpy(s.heard, "will it rain tomorrow?");
+    s.level = 0.75f;  // nothing heard yet: the band says how to finish
     face_render(&g, &s);
     save(&g, dir, "1_listening");
 

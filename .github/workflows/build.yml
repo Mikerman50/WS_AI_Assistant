@@ -10,6 +10,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Unit tests, the voice on a PC, and a syntax check of every file
+        run: |
+          make -C test/host test tts embed speaker
+          bash test/idf_stub/check.sh
+
+      - name: Upload what the voice sounds like
+        uses: actions/upload-artifact@v7
+        with:
+          name: voice-samples
+          path: test/host/build/voice_*.wav
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -20,7 +36,7 @@ jobs:
         with:
           esp_idf_version: v5.5.6
           target: esp32s3
-          command: idf.py build && idf.py merge-bin -o eink_assistant-merged.bin
+          command: idf.py build && idf.py size && idf.py merge-bin -o eink_assistant-merged.bin
 
       - name: Upload the image and the sample settings
         uses: actions/upload-artifact@v7

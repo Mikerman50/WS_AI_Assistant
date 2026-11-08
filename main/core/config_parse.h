@@ -17,13 +17,21 @@ typedef struct {
     bool claude_web_search;
     char claude_context[APP_CONTEXT_MAX + 1];  // extra notes for Claude about the household
 
-    char elevenlabs_api_key[128];  // used from milestone 2
-    char elevenlabs_voice_id[64];
+    char elevenlabs_api_key[128];  // speech to text (the voice itself is on the device)
+    char elevenlabs_stt_model[32];
+    char elevenlabs_language[12];  // e.g. "en"; empty = detect automatically
+
+    int listen_max_seconds;  // recording stops and is sent after this long
+    int listen_mic_gain_db;  // ES8311 microphone gain, 0-42 dB
 
     int display_rotation;  // quarter turns, 0-3
     bool display_busy_active_high;
 
-    int speech_pace_cps;  // subtitle pace while there is no audio
+    bool speech_enabled;  // speak replies with the on-device voice
+    int speech_volume;    // 0-100
+    int speech_speed;     // percent of normal, 50-200
+    int speech_pitch;     // percent of normal, 50-200
+    int speech_pace_cps;  // subtitle pace when the voice is off
 } app_config_t;
 
 void config_set_defaults(app_config_t *c);

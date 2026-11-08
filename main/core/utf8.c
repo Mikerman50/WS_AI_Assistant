@@ -50,3 +50,15 @@ int utf8_count(const char *s)
     }
     return n;
 }
+
+size_t utf8_truncate(const char *s, size_t n)
+{
+    if (n == 0) return 0;
+    // Step back over continuation bytes to the start of the last character.
+    size_t i = n;
+    while (i > 0 && ((unsigned char)s[i - 1] & 0xC0) == 0x80) i--;
+    if (i == 0) return 0;
+    unsigned char lead = (unsigned char)s[i - 1];
+    size_t need = lead < 0x80 ? 1 : (lead & 0xE0) == 0xC0 ? 2 : (lead & 0xF0) == 0xE0 ? 3 : (lead & 0xF8) == 0xF0 ? 4 : 1;
+    return (n - (i - 1) >= need) ? n : i - 1;
+}

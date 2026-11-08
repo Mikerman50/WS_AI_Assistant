@@ -219,7 +219,8 @@ static void describe_http_error(int status, const char *body, char *err, size_t 
     cJSON_Delete(j);
 }
 
-esp_err_t claude_ask(const char *question, claude_sentence_cb_t cb, void *ctx, char *err, size_t errsz)
+esp_err_t claude_ask(const char *question, claude_sentence_cb_t cb, void *ctx, volatile bool *cancel, char *err,
+                     size_t errsz)
 {
     esp_err_t ret = ESP_FAIL;
     char *body = NULL, *buf = NULL;
@@ -300,6 +301,7 @@ esp_err_t claude_ask(const char *question, claude_sentence_cb_t cb, void *ctx, c
     }
 
     while (!st->done) {
+        if (cancel && *cancel) break;
         int n = esp_http_client_read(http, buf, READ_CHUNK);
         if (n < 0) {
             snprintf(err, errsz, "The connection to Claude dropped.");
@@ -315,6 +317,14 @@ esp_err_t claude_ask(const char *question, claude_sentence_cb_t cb, void *ctx, c
             first = false;
         }
         sse_feed(&sse, buf, (size_t)n);
+    }
+    if (cancel && *cancel) {
+        // Stopped by the user: keep what was said so far so the conversation still makes sense.
+        if (st->reply && st->reply_len > 0) history_add(question, st->reply);
+        s_last_us = esp_timer_get_time();
+        ESP_LOGI(TAG, "reply stopped by the user");
+        ret = ESP_ERR_NOT_FINISHED;
+        goto out;
     }
     ts_finish(&st->ts);
 

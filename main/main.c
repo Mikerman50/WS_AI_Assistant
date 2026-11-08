@@ -1,9 +1,11 @@
-// E-ink Claude assistant, milestone 1: face, subtitles and streaming Claude replies.
-// All settings come from config.json on the microSD card (see sdcard/config.json).
+// E-ink Claude assistant: tap BOOT, talk, tap again, and Claude's reply is spoken
+// by an on-device voice with subtitles over the face. All settings come from
+// config.json on the microSD card (see sdcard/config.json).
 #include <stdbool.h>
 #include <stdio.h>
 
 #include "assistant.h"
+#include "audio.h"
 #include "board.h"
 #include "claude.h"
 #include "config_store.h"
@@ -14,6 +16,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "speaker.h"
+#include "stt.h"
 #include "ui.h"
 #include "wifi.h"
 
@@ -44,12 +47,8 @@ static void on_button(board_btn_t button, board_btn_event_t event)
         if (button == BTN_BOOT && event == BTN_SHORT) esp_restart();
         return;
     }
-    if (button == BTN_BOOT && event == BTN_SHORT) {
-        // Becomes push-to-talk in milestone 3.
-        assistant_ask("Introduce yourself in one sentence, then tell me one surprising fact.");
-    } else if (button == BTN_BOOT && event == BTN_LONG) {
-        claude_forget();
-        ui_set_pinned("New conversation");
+    if (button == BTN_BOOT) {
+        assistant_button(event == BTN_LONG);
     } else if (button == BTN_PWR && event == BTN_SHORT) {
         ui_full_refresh();
     }
@@ -81,15 +80,22 @@ void app_main(void)
 
     ui_set_pinned(src == CFG_FROM_SAVED ? "No SD card: saved settings" : "Connecting\xE2\x80\xA6");
     wifi_start(s_cfg.wifi_ssid, s_cfg.wifi_password);
-    claude_init(&s_cfg);
-    speaker_init(s_cfg.speech_pace_cps);
-    assistant_init();
+    claude_init(&s_cfg);  // also points cJSON at PSRAM, so it comes before anything else parses JSON
+    stt_init(&s_cfg);
+    bool audio_ok = audio_init(board_i2c_bus(), s_cfg.listen_mic_gain_db) == ESP_OK;
+    if (!audio_ok) ESP_LOGE(TAG, "audio codec unavailable; typed questions and subtitles still work");
+    speaker_init(&s_cfg, audio_ok);  // starts the on-device voice (a second or two)
+    assistant_init(&s_cfg, audio_ok);
     s_running = true;
 
-    if (wifi_wait(20000)) {
-        ui_set_pinned("Ready: press BOOT");
-    } else {
+    if (!wifi_wait(20000)) {
         ESP_LOGW(TAG, "no Wi-Fi yet; check wifi.ssid and wifi.password in config.json");
         ui_set_pinned("No Wi-Fi: check config.json");
+    } else if (!stt_ready()) {
+        ui_set_pinned("Add an ElevenLabs key to talk");
+    } else if (s_cfg.speech_enabled && !speaker_has_voice()) {
+        ui_set_pinned("No voice: subtitles only");
+    } else {
+        ui_set_pinned("Tap BOOT to talk");
     }
 }
