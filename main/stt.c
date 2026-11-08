@@ -10,6 +10,7 @@
 #include "esp_partition.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "tasr_nemo.h"
@@ -33,6 +34,8 @@ static tasr_decoder_t *s_dec;
 static TaskHandle_t s_task;
 static SemaphoreHandle_t s_done;
 static TickType_t s_last_pause;
+// Why listening isn't available, in a few words for the screen.
+static const char *s_problem = "Speech model not set up";
 
 // One transcription at a time, handed to the recogniser task.
 static struct {
@@ -95,8 +98,16 @@ void stt_init(const app_config_t *cfg, const void *lm, size_t lm_len)
     s_done = xSemaphoreCreateBinary();
     // Core 1, below the UI, buttons and network work, like the voice. Created
     // first, so its stack is in place before the model takes any memory.
-    if (!s_done || xTaskCreatePinnedToCore(asr_task, "asr", ASR_STACK, NULL, 3, &s_task, 1) != pdPASS) {
+    bool task_ok = s_done && xTaskCreatePinnedToCore(asr_task, "asr", ASR_STACK, NULL, 3, &s_task, 1) == pdPASS;
+    if (!task_ok && s_done) {  // short of internal RAM: a stack in PSRAM is slower but works
+        ESP_LOGW(TAG, "recogniser stack in PSRAM (%u KB internal RAM free)",
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+        task_ok = xTaskCreatePinnedToCoreWithCaps(asr_task, "asr", ASR_STACK, NULL, 3, &s_task, 1,
+                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS;
+    }
+    if (!task_ok) {
         ESP_LOGE(TAG, "no memory for the recogniser task");
+        s_problem = "No memory for listening";
         return;
     }
 
@@ -104,25 +115,33 @@ void stt_init(const app_config_t *cfg, const void *lm, size_t lm_len)
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)ASR_SUBTYPE, ASR_PARTITION);
     if (!part) {
         ESP_LOGE(TAG, "no \"%s\" partition: this firmware needs its own partitions.csv", ASR_PARTITION);
+        s_problem = "No asr partition: flash full .bin";
         return;
     }
     const void *blob = NULL;
     esp_partition_mmap_handle_t map;
     if (esp_partition_mmap(part, 0, part->size, ESP_PARTITION_MMAP_DATA, &blob, &map) != ESP_OK) {
         ESP_LOGE(TAG, "couldn't map the speech model");
+        s_problem = "Speech model unreadable";
         return;
     }
+    ESP_LOGI(TAG, "asr partition at 0x%lx, %lu bytes, starts %02x %02x %02x %02x", (unsigned long)part->address,
+             (unsigned long)part->size, ((const uint8_t *)blob)[0], ((const uint8_t *)blob)[1],
+             ((const uint8_t *)blob)[2], ((const uint8_t *)blob)[3]);
     if (memcmp(blob, "TNM1", 4) != 0) {
         ESP_LOGE(TAG, "no speech model in flash: flash the merged image, which includes it");
+        s_problem = ((const uint8_t *)blob)[0] == 0xFF ? "Model not flashed: use merged .bin" : "Wrong data in model partition";
         esp_partition_munmap(map);
         return;
     }
     s_model = tasr_nemo_load(blob, part->size);
     if (!s_model) {
         ESP_LOGE(TAG, "the speech model in flash is damaged: flash the merged image again");
+        s_problem = "Speech model damaged: reflash";
         esp_partition_munmap(map);
         return;
     }
+    s_problem = NULL;
     ESP_LOGI(TAG, "speech model ready: %u KB of weights read in place from flash",
              (unsigned)(tasr_nemo_weight_bytes(s_model) / 1024));
 
@@ -141,6 +160,11 @@ bool stt_ready(void)
     return s_model != NULL;
 }
 
+const char *stt_problem(void)
+{
+    return s_problem ? s_problem : "";
+}
+
 bool stt_has_language_model(void)
 {
     return s_dec != NULL;
@@ -152,7 +176,7 @@ esp_err_t stt_transcribe(int16_t *pcm, size_t samples, char *text, size_t textsz
     if (textsz) text[0] = '\0';
     if (errsz) err[0] = '\0';
     if (!s_model) {
-        snprintf(err, errsz, "My speech model is missing. Flash the full firmware image.");
+        snprintf(err, errsz, "I can't listen yet. %s.", stt_problem());
         return ESP_ERR_INVALID_STATE;
     }
     // Working memory grows with the recording: about 0.6 MB plus 3.5 bytes per

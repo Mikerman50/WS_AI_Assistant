@@ -145,7 +145,10 @@ static void listen_then_answer(void)
 {
     if (!s_voice_ok || !stt_ready()) {
         ctl(CTL_LISTEN_ENDED);
-        say_error(s_voice_ok ? "My speech model is missing. Flash the full firmware image." : "I couldn't start the microphone.");
+        char msg[96];
+        if (s_voice_ok) snprintf(msg, sizeof msg, "I can't listen yet. %s.", stt_problem());
+        else snprintf(msg, sizeof msg, "I couldn't start the microphone.");
+        say_error(msg);
         return;
     }
 

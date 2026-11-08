@@ -18,6 +18,9 @@ void stt_init(const app_config_t *cfg, const void *lm, size_t lm_len);
 // True if the speech model was found in flash.
 bool stt_ready(void);
 
+// When not ready: why, in a few words for the screen ("" when ready).
+const char *stt_problem(void);
+
 // True if the language model is in use.
 bool stt_has_language_model(void);
 

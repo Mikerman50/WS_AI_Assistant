@@ -88,6 +88,9 @@ BaseType_t xTaskCreate(TaskFunction_t fn, const char *name, uint32_t stack, void
 BaseType_t xTaskCreatePinnedToCore(TaskFunction_t fn, const char *const name, const uint32_t stack, void *const arg,
                                    UBaseType_t prio, TaskHandle_t *const handle, const BaseType_t core);
 TickType_t xTaskGetTickCount(void);
+BaseType_t xTaskCreatePinnedToCoreWithCaps(TaskFunction_t fn, const char *const name, const uint32_t stack,
+                                           void *const arg, UBaseType_t prio, TaskHandle_t *const handle,
+                                           const BaseType_t core, UBaseType_t caps);
 BaseType_t xTaskNotifyGive(TaskHandle_t task);
 uint32_t ulTaskNotifyTake(BaseType_t clear, TickType_t wait);
 QueueHandle_t xQueueCreate(UBaseType_t len, UBaseType_t item_size);

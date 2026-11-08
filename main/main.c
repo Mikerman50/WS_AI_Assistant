@@ -123,7 +123,7 @@ void app_main(void)
         ESP_LOGW(TAG, "no Wi-Fi yet; check wifi.ssid and wifi.password in config.json");
         ui_set_pinned("No Wi-Fi: check config.json");
     } else if (!stt_ready()) {
-        ui_set_pinned("No speech model: reflash");
+        ui_set_pinned(stt_problem());
     } else if (s_cfg.speech_enabled && !speaker_has_voice()) {
         ui_set_pinned("No voice files: subtitles only");
     } else {
