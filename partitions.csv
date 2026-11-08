@@ -1,0 +1,9 @@
+# Name,    Type, SubType, Offset, Size
+# Two app slots so over-the-air updates can be added later; "model" is
+# reserved for wake-word models.
+nvs,       data, nvs,     ,       0x6000
+otadata,   data, ota,     ,       0x2000
+phy_init,  data, phy,     ,       0x1000
+ota_0,     app,  ota_0,   ,       3M
+ota_1,     app,  ota_1,   ,       3M
+model,     data, spiffs,  ,       1M

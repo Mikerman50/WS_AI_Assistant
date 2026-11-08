@@ -1,0 +1,24 @@
+{
+  "wifi": {
+    "ssid": "YOUR_WIFI_NAME",
+    "password": "YOUR_WIFI_PASSWORD"
+  },
+  "claude": {
+    "api_key": "YOUR_ANTHROPIC_API_KEY",
+    "model": "claude-haiku-5-5",
+    "max_tokens": 300,
+    "web_search": false,
+    "context": ""
+  },
+  "elevenlabs": {
+    "api_key": "",
+    "voice_id": ""
+  },
+  "display": {
+    "rotation": 0,
+    "busy_active_high": true
+  },
+  "speech": {
+    "pace_chars_per_sec": 15
+  }
+}

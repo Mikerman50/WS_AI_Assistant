@@ -1,0 +1,31 @@
+# Builds one flashable firmware image on GitHub's servers, so you don't need
+# ESP-IDF installed. Push this project to a GitHub repository, then open
+# Actions -> the latest "Build firmware" run -> Artifacts -> eink-assistant-firmware.
+# The firmware holds no secrets (they live in config.json on the SD card), so a
+# public repository is fine.
+name: Build firmware
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build with ESP-IDF v5.5.6
+        uses: espressif/esp-idf-ci-action@v1.2.0
+        with:
+          esp_idf_version: v5.5.6
+          target: esp32s3
+          command: idf.py build && idf.py merge-bin -o eink_assistant-merged.bin
+
+      - name: Upload the image and the sample settings
+        uses: actions/upload-artifact@v7
+        with:
+          name: eink-assistant-firmware
+          path: |
+            build/eink_assistant-merged.bin
+            sdcard/config.json

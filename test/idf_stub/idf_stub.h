@@ -1,0 +1,288 @@
+// Minimal ESP-IDF declarations so the firmware sources can be syntax-checked with
+// the host compiler (test/idf_stub/check.sh). Signatures mirror ESP-IDF 5.3-5.5;
+// nothing here is ever linked or run.
+#pragma once
+
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+// ---- esp_err.h
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_FAIL -1
+#define ESP_ERR_NO_MEM 0x101
+#define ESP_ERR_INVALID_STATE 0x103
+#define ESP_ERR_NVS_NO_FREE_PAGES 0x110d
+#define ESP_ERR_NVS_NEW_VERSION_FOUND 0x1110
+#define ESP_ERROR_CHECK(x) ((void)(x))
+
+// ---- esp_log.h
+#define ESP_LOGE(tag, fmt, ...) printf("E %s: " fmt "\n", tag, ##__VA_ARGS__)
+#define ESP_LOGW(tag, fmt, ...) printf("W %s: " fmt "\n", tag, ##__VA_ARGS__)
+#define ESP_LOGI(tag, fmt, ...) printf("I %s: " fmt "\n", tag, ##__VA_ARGS__)
+
+// ---- esp_timer.h
+int64_t esp_timer_get_time(void);
+
+// ---- esp_heap_caps.h
+#define MALLOC_CAP_DMA (1 << 3)
+#define MALLOC_CAP_8BIT (1 << 2)
+#define MALLOC_CAP_SPIRAM (1 << 10)
+void *heap_caps_malloc(size_t size, uint32_t caps);
+void *heap_caps_realloc(void *ptr, size_t size, uint32_t caps);
+
+// ---- esp_idf_version.h
+#define ESP_IDF_VERSION_VAL(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
+#define ESP_IDF_VERSION ESP_IDF_VERSION_VAL(5, 4, 0)
+
+// ---- FreeRTOS
+typedef uint32_t TickType_t;
+typedef long BaseType_t;
+typedef unsigned long UBaseType_t;
+typedef uint32_t EventBits_t;
+typedef void *TaskHandle_t;
+typedef void *QueueHandle_t;
+typedef void *SemaphoreHandle_t;
+typedef void *EventGroupHandle_t;
+typedef void (*TaskFunction_t)(void *);
+#define pdTRUE 1
+#define pdFALSE 0
+#define pdPASS 1
+#define portMAX_DELAY ((TickType_t)0xffffffffUL)
+#define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
+#define BIT0 0x00000001
+void vTaskDelay(TickType_t ticks);
+BaseType_t xTaskCreate(TaskFunction_t fn, const char *name, uint32_t stack, void *arg, UBaseType_t prio,
+                       TaskHandle_t *handle);
+BaseType_t xTaskNotifyGive(TaskHandle_t task);
+uint32_t ulTaskNotifyTake(BaseType_t clear, TickType_t wait);
+QueueHandle_t xQueueCreate(UBaseType_t len, UBaseType_t item_size);
+BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t wait);
+BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait);
+UBaseType_t uxQueueMessagesWaiting(QueueHandle_t q);
+SemaphoreHandle_t xSemaphoreCreateMutex(void);
+BaseType_t xSemaphoreTake(SemaphoreHandle_t s, TickType_t wait);
+BaseType_t xSemaphoreGive(SemaphoreHandle_t s);
+EventGroupHandle_t xEventGroupCreate(void);
+EventBits_t xEventGroupSetBits(EventGroupHandle_t g, EventBits_t bits);
+EventBits_t xEventGroupClearBits(EventGroupHandle_t g, EventBits_t bits);
+EventBits_t xEventGroupWaitBits(EventGroupHandle_t g, EventBits_t bits, BaseType_t clear, BaseType_t all,
+                                TickType_t wait);
+
+// ---- driver/gpio.h
+typedef int gpio_num_t;
+typedef enum { GPIO_MODE_DISABLE, GPIO_MODE_INPUT, GPIO_MODE_OUTPUT } gpio_mode_t;
+typedef enum { GPIO_PULLUP_DISABLE, GPIO_PULLUP_ENABLE } gpio_pullup_t;
+typedef enum { GPIO_PULLDOWN_DISABLE, GPIO_PULLDOWN_ENABLE } gpio_pulldown_t;
+typedef enum { GPIO_INTR_DISABLE } gpio_int_type_t;
+typedef struct {
+    uint64_t pin_bit_mask;
+    gpio_mode_t mode;
+    gpio_pullup_t pull_up_en;
+    gpio_pulldown_t pull_down_en;
+    gpio_int_type_t intr_type;
+} gpio_config_t;
+esp_err_t gpio_config(const gpio_config_t *cfg);
+esp_err_t gpio_set_level(gpio_num_t pin, uint32_t level);
+int gpio_get_level(gpio_num_t pin);
+esp_err_t gpio_hold_en(gpio_num_t pin);
+esp_err_t gpio_hold_dis(gpio_num_t pin);
+
+// ---- driver/spi_master.h
+typedef enum { SPI1_HOST, SPI2_HOST, SPI3_HOST } spi_host_device_t;
+typedef enum { SPI_DMA_DISABLED = 0, SPI_DMA_CH_AUTO = 3 } spi_common_dma_t;
+#define SPI_TRANS_USE_TXDATA (1 << 3)
+typedef struct {
+    int mosi_io_num, miso_io_num, sclk_io_num, quadwp_io_num, quadhd_io_num;
+    int max_transfer_sz;
+    uint32_t flags;
+} spi_bus_config_t;
+typedef struct {
+    uint8_t mode;
+    int clock_speed_hz;
+    int spics_io_num;
+    uint32_t flags;
+    int queue_size;
+} spi_device_interface_config_t;
+typedef struct {
+    uint32_t flags;
+    uint16_t cmd;
+    uint64_t addr;
+    size_t length;
+    size_t rxlength;
+    void *user;
+    union {
+        const void *tx_buffer;
+        uint8_t tx_data[4];
+    };
+    union {
+        void *rx_buffer;
+        uint8_t rx_data[4];
+    };
+} spi_transaction_t;
+typedef struct spi_device_t *spi_device_handle_t;
+esp_err_t spi_bus_initialize(spi_host_device_t host, const spi_bus_config_t *cfg, spi_common_dma_t dma);
+esp_err_t spi_bus_add_device(spi_host_device_t host, const spi_device_interface_config_t *cfg,
+                             spi_device_handle_t *handle);
+esp_err_t spi_device_polling_transmit(spi_device_handle_t handle, spi_transaction_t *t);
+
+// ---- driver/usb_serial_jtag.h (+ vfs)
+typedef struct {
+    uint32_t tx_buffer_size;
+    uint32_t rx_buffer_size;
+} usb_serial_jtag_driver_config_t;
+#define USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT() {.tx_buffer_size = 256, .rx_buffer_size = 256}
+esp_err_t usb_serial_jtag_driver_install(usb_serial_jtag_driver_config_t *cfg);
+int usb_serial_jtag_read_bytes(void *buf, uint32_t length, TickType_t wait);
+void usb_serial_jtag_vfs_use_driver(void);
+void esp_vfs_usb_serial_jtag_use_driver(void);
+
+// ---- esp_adc
+typedef enum { ADC_UNIT_1, ADC_UNIT_2 } adc_unit_t;
+typedef enum { ADC_CHANNEL_0, ADC_CHANNEL_1, ADC_CHANNEL_2, ADC_CHANNEL_3 } adc_channel_t;
+typedef enum { ADC_ATTEN_DB_0, ADC_ATTEN_DB_2_5, ADC_ATTEN_DB_6, ADC_ATTEN_DB_12 } adc_atten_t;
+typedef enum { ADC_BITWIDTH_DEFAULT = 0, ADC_BITWIDTH_12 = 12 } adc_bitwidth_t;
+typedef struct adc_oneshot_unit_ctx_t *adc_oneshot_unit_handle_t;
+typedef struct adc_cali_scheme_t *adc_cali_handle_t;
+typedef struct {
+    adc_unit_t unit_id;
+    int clk_src;
+    int ulp_mode;
+} adc_oneshot_unit_init_cfg_t;
+typedef struct {
+    adc_atten_t atten;
+    adc_bitwidth_t bitwidth;
+} adc_oneshot_chan_cfg_t;
+typedef struct {
+    adc_unit_t unit_id;
+    adc_channel_t chan;
+    adc_atten_t atten;
+    adc_bitwidth_t bitwidth;
+} adc_cali_curve_fitting_config_t;
+esp_err_t adc_oneshot_new_unit(const adc_oneshot_unit_init_cfg_t *cfg, adc_oneshot_unit_handle_t *ret);
+esp_err_t adc_oneshot_config_channel(adc_oneshot_unit_handle_t h, adc_channel_t ch, const adc_oneshot_chan_cfg_t *cfg);
+esp_err_t adc_oneshot_read(adc_oneshot_unit_handle_t h, adc_channel_t ch, int *out_raw);
+esp_err_t adc_cali_create_scheme_curve_fitting(const adc_cali_curve_fitting_config_t *cfg, adc_cali_handle_t *ret);
+esp_err_t adc_cali_raw_to_voltage(adc_cali_handle_t h, int raw, int *voltage);
+
+// ---- esp_event.h / esp_netif.h / esp_wifi.h
+typedef const char *esp_event_base_t;
+typedef void (*esp_event_handler_t)(void *arg, esp_event_base_t base, int32_t id, void *data);
+extern esp_event_base_t const WIFI_EVENT;
+extern esp_event_base_t const IP_EVENT;
+#define ESP_EVENT_ANY_ID -1
+enum { WIFI_EVENT_STA_START = 2, WIFI_EVENT_STA_DISCONNECTED = 5 };
+enum { IP_EVENT_STA_GOT_IP = 0 };
+esp_err_t esp_event_loop_create_default(void);
+esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id, esp_event_handler_t h, void *arg);
+typedef struct esp_netif_obj esp_netif_t;
+esp_err_t esp_netif_init(void);
+esp_netif_t *esp_netif_create_default_wifi_sta(void);
+typedef struct {
+    int dummy;
+} wifi_init_config_t;
+#define WIFI_INIT_CONFIG_DEFAULT() {0}
+typedef enum { WIFI_AUTH_OPEN = 0, WIFI_AUTH_WPA2_PSK = 3 } wifi_auth_mode_t;
+typedef enum { WIFI_MODE_NULL, WIFI_MODE_STA } wifi_mode_t;
+typedef enum { WIFI_IF_STA } wifi_interface_t;
+typedef enum { WIFI_PS_NONE, WIFI_PS_MIN_MODEM } wifi_ps_type_t;
+typedef struct {
+    wifi_auth_mode_t authmode;
+} wifi_scan_threshold_t;
+typedef struct {
+    uint8_t ssid[32];
+    uint8_t password[64];
+    wifi_scan_threshold_t threshold;
+} wifi_sta_config_t;
+typedef union {
+    wifi_sta_config_t sta;
+} wifi_config_t;
+esp_err_t esp_wifi_init(const wifi_init_config_t *cfg);
+esp_err_t esp_wifi_set_mode(wifi_mode_t mode);
+esp_err_t esp_wifi_set_config(wifi_interface_t iface, wifi_config_t *cfg);
+esp_err_t esp_wifi_start(void);
+esp_err_t esp_wifi_connect(void);
+esp_err_t esp_wifi_set_ps(wifi_ps_type_t type);
+
+// ---- nvs_flash.h
+esp_err_t nvs_flash_init(void);
+esp_err_t nvs_flash_erase(void);
+
+// ---- esp_http_client.h / esp_crt_bundle.h
+typedef enum { HTTP_METHOD_GET, HTTP_METHOD_POST } esp_http_client_method_t;
+typedef struct esp_http_client *esp_http_client_handle_t;
+typedef struct {
+    const char *url;
+    esp_http_client_method_t method;
+    int timeout_ms;
+    int buffer_size;
+    int buffer_size_tx;
+    esp_err_t (*crt_bundle_attach)(void *conf);
+} esp_http_client_config_t;
+esp_err_t esp_crt_bundle_attach(void *conf);
+esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *cfg);
+esp_err_t esp_http_client_set_header(esp_http_client_handle_t c, const char *key, const char *value);
+esp_err_t esp_http_client_open(esp_http_client_handle_t c, int write_len);
+int esp_http_client_write(esp_http_client_handle_t c, const char *buf, int len);
+int64_t esp_http_client_fetch_headers(esp_http_client_handle_t c);
+int esp_http_client_get_status_code(esp_http_client_handle_t c);
+int esp_http_client_read(esp_http_client_handle_t c, char *buf, int len);
+bool esp_http_client_is_complete_data_received(esp_http_client_handle_t c);
+esp_err_t esp_http_client_close(esp_http_client_handle_t c);
+esp_err_t esp_http_client_cleanup(esp_http_client_handle_t c);
+
+// ---- esp_err.h / esp_system.h extras
+const char *esp_err_to_name(esp_err_t code);
+void esp_restart(void) __attribute__((__noreturn__));
+
+// ---- nvs.h
+typedef uint32_t nvs_handle_t;
+typedef enum { NVS_READONLY, NVS_READWRITE } nvs_open_mode_t;
+esp_err_t nvs_open(const char *namespace_name, nvs_open_mode_t open_mode, nvs_handle_t *out_handle);
+esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out_value, size_t *length);
+esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value, size_t length);
+esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key);
+esp_err_t nvs_commit(nvs_handle_t handle);
+void nvs_close(nvs_handle_t handle);
+
+// ---- driver/sdmmc_host.h, sdmmc_cmd.h, esp_vfs_fat.h
+#define GPIO_NUM_NC (-1)
+#define BIT(n) (1UL << (n))
+typedef struct {
+    uint32_t flags;
+    int slot;
+    int max_freq_khz;
+} sdmmc_host_t;
+#define SDMMC_HOST_DEFAULT() {.flags = 0, .slot = 1, .max_freq_khz = 20000}
+typedef struct {
+    gpio_num_t clk, cmd, d0, d1, d2, d3, d4, d5, d6, d7;
+    union {
+        gpio_num_t gpio_cd;
+        gpio_num_t cd;
+    };
+    union {
+        gpio_num_t gpio_wp;
+        gpio_num_t wp;
+    };
+    uint8_t width;
+    uint32_t flags;
+#define SDMMC_SLOT_FLAG_INTERNAL_PULLUP BIT(0)
+} sdmmc_slot_config_t;
+#define SDMMC_SLOT_CONFIG_DEFAULT() {.clk = 14, .cmd = 15, .d0 = 2, .cd = -1, .wp = -1, .width = 0, .flags = 0}
+typedef struct sdmmc_card_s {
+    int dummy;
+} sdmmc_card_t;
+typedef struct {
+    bool format_if_mount_failed;
+    int max_files;
+    size_t allocation_unit_size;
+    bool disk_status_check_enable;
+    bool use_one_fat;
+} esp_vfs_fat_mount_config_t;
+typedef esp_vfs_fat_mount_config_t esp_vfs_fat_sdmmc_mount_config_t;
+esp_err_t esp_vfs_fat_sdmmc_mount(const char *base_path, const sdmmc_host_t *host_config, const void *slot_config,
+                                  const esp_vfs_fat_mount_config_t *mount_config, sdmmc_card_t **out_card);
+esp_err_t esp_vfs_fat_sdcard_unmount(const char *base_path, sdmmc_card_t *card);

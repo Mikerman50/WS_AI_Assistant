@@ -1,0 +1,37 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "board.c"
+        "config_store.c"
+        "epd_ssd1681.c"
+        "ui.c"
+        "wifi.c"
+        "claude.c"
+        "assistant.c"
+        "speaker_paced.c"
+        "console.c"
+        "core/utf8.c"
+        "core/font.c"
+        "core/gfx.c"
+        "core/face.c"
+        "core/captions.c"
+        "core/text_stream.c"
+        "core/sse.c"
+        "core/config_parse.c"
+        "core/fonts/font_caption.c"
+        "core/fonts/font_small.c"
+    INCLUDE_DIRS "." "core"
+    PRIV_REQUIRES
+        driver
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_timer
+        esp_adc
+        esp_http_client
+        mbedtls
+        json
+        nvs_flash
+        fatfs
+        sdmmc
+)
