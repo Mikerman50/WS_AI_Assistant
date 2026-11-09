@@ -1,5 +1,6 @@
 #include "assistant.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,7 @@
 #include "stt.h"
 #include "ui.h"
 #include "voice_ctl.h"
+#include "wake.h"
 #include "wifi.h"
 
 static const char *TAG = "assistant";
@@ -31,7 +33,8 @@ typedef enum { CMD_LISTEN, CMD_ASK, CMD_SAY } cmd_kind_t;
 
 typedef struct {
     cmd_kind_t kind;
-    char *text;  // CMD_ASK and CMD_SAY
+    char *text;       // CMD_ASK and CMD_SAY
+    bool hands_free;  // CMD_LISTEN: started by the wake word
 } cmd_t;
 
 static QueueHandle_t s_queue;
@@ -41,6 +44,8 @@ static volatile bool s_stop_listening;  // tap: finished speaking
 static volatile bool s_cancel;          // hold while listening, or tap while busy
 static int s_max_seconds = 30;
 static bool s_voice_ok;
+static bool s_chime;
+static int s_volume = 70;
 
 static int64_t now_ms(void)
 {
@@ -69,17 +74,30 @@ static void ctl(ctl_event_t e)
     xSemaphoreGive(s_ctl_lock);
 }
 
+static void start_listening(bool hands_free)
+{
+    s_stop_listening = false;
+    s_cancel = false;
+    cmd_t c = {.kind = CMD_LISTEN, .hands_free = hands_free};
+    if (xQueueSend(s_queue, &c, 0) != pdTRUE) ctl(CTL_RESET);
+}
+
+void assistant_wake(void)
+{
+    if (!s_queue) return;
+    xSemaphoreTake(s_ctl_lock, portMAX_DELAY);
+    voice_action_t a = s_ctl.state == VS_IDLE ? voice_ctl_button(&s_ctl, false, now_ms()) : VA_NONE;
+    xSemaphoreGive(s_ctl_lock);
+    if (a == VA_START_LISTENING) start_listening(true);
+}
+
 void assistant_button(bool long_press)
 {
     if (!s_queue) return;
     switch (ctl_button(long_press)) {
-    case VA_START_LISTENING: {
-        s_stop_listening = false;
-        s_cancel = false;
-        cmd_t c = {.kind = CMD_LISTEN};
-        if (xQueueSend(s_queue, &c, 0) != pdTRUE) ctl(CTL_RESET);
+    case VA_START_LISTENING:
+        start_listening(false);
         break;
-    }
     case VA_FINISH_LISTENING:
         ESP_LOGI(TAG, "finished speaking");
         s_stop_listening = true;
@@ -143,7 +161,32 @@ static void answer(const char *question)
     memory_save();  // anything it chose to remember goes on the card
 }
 
-static void listen_then_answer(void)
+// A short rising two-note chime: "I'm listening".
+static void chime(void)
+{
+    if (audio_speaker_open(s_volume) != ESP_OK) return;
+    static const struct {
+        float hz;
+        int ms;
+    } notes[] = {{880.0f, 90}, {1318.5f, 120}};
+    int16_t buf[160];  // 10 ms
+    for (size_t k = 0; k < sizeof notes / sizeof notes[0]; k++) {
+        int total = notes[k].ms * AUDIO_SAMPLE_RATE / 1000, fade = AUDIO_SAMPLE_RATE / 125;  // 8 ms fades
+        float phase = 0.0f, step = 2.0f * 3.14159265f * notes[k].hz / AUDIO_SAMPLE_RATE;
+        for (int i = 0; i < total;) {
+            int n = 0;
+            for (; n < 160 && i < total; n++, i++) {
+                float env = i < fade ? (float)i / fade : i > total - fade ? (float)(total - i) / fade : 1.0f;
+                buf[n] = (int16_t)(9000.0f * env * sinf(phase));
+                phase += step;
+            }
+            audio_speaker_write(buf, (size_t)n);
+        }
+    }
+    audio_speaker_close();
+}
+
+static void listen_then_answer(bool hands_free)
 {
     if (!s_voice_ok || !stt_ready()) {
         ctl(CTL_LISTEN_ENDED);
@@ -154,13 +197,17 @@ static void listen_then_answer(void)
         return;
     }
 
+    wake_pause();  // the microphone is ours until the recording ends
     ui_set_heard(NULL);
+    ui_set_hands_free(hands_free);
     ui_set_expr(EXPR_NEUTRAL);
     ui_set_mode(MODE_LISTENING);
+    if (hands_free && s_chime) chime();
     board_led(true);
     recording_t rec;
-    esp_err_t err = recorder_capture(&rec, s_max_seconds, &s_stop_listening, on_level);
+    esp_err_t err = recorder_capture(&rec, s_max_seconds, &s_stop_listening, on_level, hands_free);
     board_led(false);
+    wake_resume();
 
     if (s_cancel) {  // held BOOT to cancel
         recorder_free(&rec);
@@ -209,7 +256,7 @@ static void assistant_task(void *arg)
         cmd_t c;
         xQueueReceive(s_queue, &c, portMAX_DELAY);
         if (c.kind == CMD_LISTEN) {
-            listen_then_answer();
+            listen_then_answer(c.hands_free);
         } else if (c.kind == CMD_ASK) {
             ctl(CTL_BUSY);
             s_cancel = false;
@@ -268,6 +315,8 @@ void assistant_init(const app_config_t *cfg, bool voice_ok)
 {
     s_max_seconds = cfg->listen_max_seconds;
     s_voice_ok = voice_ok;
+    s_chime = cfg->wake_chime;
+    s_volume = cfg->speech_volume;
     voice_ctl_init(&s_ctl);
     s_ctl_lock = xSemaphoreCreateMutex();
     s_queue = xQueueCreate(4, sizeof(cmd_t));

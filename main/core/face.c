@@ -219,7 +219,7 @@ void face_render(gfx_t *g, const face_state_t *s)
             strcpy(line, "you: ");
             strncat(line, s->heard, sizeof line - strlen(line) - 1);
         } else {
-            strcpy(line, "Tap BOOT when done");
+            strcpy(line, s->hands_free ? "Listening\xE2\x80\xA6" : "Tap BOOT when done");
         }
         band(g, 0, 28, line, 19);
     }

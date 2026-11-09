@@ -15,6 +15,7 @@ idf_component_register(
         "assistant.c"
         "speaker.c"
         "console.c"
+        "wake.c"
         "core/utf8.c"
         "core/font.c"
         "core/gfx.c"
@@ -28,6 +29,9 @@ idf_component_register(
         "core/asr_text.c"
         "core/memory_text.c"
         "core/idle.c"
+        "core/wake_words.c"
+        "core/endpoint.c"
+        "core/power_src.c"
         "core/tts_text.c"
         "core/fonts/font_caption.c"
         "core/fonts/font_small.c"
@@ -48,4 +52,5 @@ idf_component_register(
         esp_partition
         picotts
         oido
+        wakeword
 )

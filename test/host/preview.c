@@ -47,6 +47,10 @@ int main(int argc, char **argv)
     s.level = 0.75f;  // nothing heard yet: the band says how to finish
     face_render(&g, &s);
     save(&g, dir, "1_listening");
+    s.hands_free = true;  // started by the wake word: it stops by itself
+    s.level = 0.4f;
+    face_render(&g, &s);
+    save(&g, dir, "1_listening_hands_free");
 
     face_state_init(&s);
     s.mode = MODE_THINKING;

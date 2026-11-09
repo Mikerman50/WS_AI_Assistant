@@ -19,6 +19,9 @@
 #include "tts_text.h"
 #include "utf8.h"
 #include "voice_ctl.h"
+#include "wake_words.h"
+#include "endpoint.h"
+#include "power_src.h"
 
 static int g_fail, g_pass;
 
@@ -373,6 +376,17 @@ static void test_config(void)
     CHECK_STR(c.claude_context, "");
     CHECK(c.listen_max_seconds == 20 && c.listen_mic_gain_db == 30 && c.listen_language_model);
     CHECK_STR(c.claude_personality, "friendly");
+    CHECK_STR(c.wake_word, "hey jarvis");
+    CHECK_STR(c.wake_listen, "usb");
+    CHECK_STR(c.wake_sensitivity, "normal");
+    CHECK(c.wake_chime);
+    CHECK(parse("{\"wifi\":{\"ssid\":\"Home\"},\"claude\":{\"api_key\":\"k\"},\"wake_word\":{\"word\":\"Okay Nabu\","
+                "\"listen\":\"always\",\"sensitivity\":\"high\",\"chime\":false}}", &c, err));
+    CHECK_STR(c.wake_word, "Okay Nabu");
+    CHECK_STR(c.wake_listen, "always");
+    CHECK(!c.wake_chime && wake_sens_from_name(c.wake_sensitivity) == WAKE_SENS_HIGH);
+    CHECK(parse("{\"wifi\":{\"ssid\":\"Home\"},\"claude\":{\"api_key\":\"k\"},\"wake_word\":{\"word\":\"off\"}}", &c,
+                err));
     CHECK(c.speech_enabled && c.speech_volume == 70 && c.speech_speed == 100 && c.speech_pitch == 100);
 
     // Every field set. (The elevenlabs section is left over from an older version
@@ -438,6 +452,14 @@ static void test_config(void)
          "listen.mic_gain_db must be 0 to 42."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"idle\": {\"activity\": \"wild\"}}",
          "idle.activity must be off, calm or lively."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"wake_word\": {\"word\": \"hey claude\"}}",
+         "wake_word.word isn't one it knows (see README)."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"wake_word\": {\"listen\": \"battery\"}}",
+         "wake_word.listen must be usb or always."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"wake_word\": {\"sensitivity\": \"max\"}}",
+         "wake_word.sensitivity must be low, normal or high."},
+        {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"wake_word\": {\"chime\": \"yes\"}}",
+         "wake_word.chime must be true or false."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"enabled\": \"yes\"}}",
          "speech.enabled must be true or false."},
         {"{\"wifi\": {\"ssid\": \"Home\"}, \"claude\": {\"api_key\": \"k\"}, \"speech\": {\"volume\": 101}}",
@@ -792,6 +814,142 @@ static void test_tts_prepare(void)
     CHECK(tts_prepare("x", 100, 100, out, 0) == 0);
 }
 
+// ---------------------------------------------------------------- wake word
+
+static void test_wake_words(void)
+{
+    CHECK(wake_word_find("hey jarvis") == &WAKE_WORDS[1]);
+    CHECK(wake_word_find("Hey_Jarvis") == &WAKE_WORDS[1]);
+    CHECK(wake_word_find("HEY, JARVIS!") == &WAKE_WORDS[1]);
+    CHECK(wake_word_find("ok nabu") == &WAKE_WORDS[3] && wake_word_find("okay_nabu") == &WAKE_WORDS[3]);
+    CHECK(wake_word_find("alexa") == &WAKE_WORDS[0] && wake_word_find("hey mycroft") == &WAKE_WORDS[2]);
+    CHECK(wake_word_find("hey claude") == NULL && wake_word_find("off") == NULL && wake_word_find("") == NULL);
+    CHECK(wake_word_is_off("off") && wake_word_is_off("None") && wake_word_is_off("") && !wake_word_is_off("alexa"));
+    CHECK(wake_sens_from_name("Normal") == WAKE_SENS_NORMAL && wake_sens_from_name("loud") == -1);
+    for (int i = 0; i < WAKE_WORD_COUNT; i++) {
+        const wake_word_t *w = &WAKE_WORDS[i];
+        float lo = wake_word_cutoff(w, WAKE_SENS_LOW), mid = wake_word_cutoff(w, WAKE_SENS_NORMAL),
+              hi = wake_word_cutoff(w, WAKE_SENS_HIGH);
+        CHECK(mid == w->cutoff && lo > mid && lo < 1.0f && hi < mid && hi >= 0.75f);
+    }
+}
+
+// A steady level for `ms`, in 32 ms chunks as the recorder reads them.
+static endpoint_result_t ep_run(endpoint_t *e, float db, int ms, int *at_ms)
+{
+    endpoint_result_t r = EP_LISTENING;
+    for (int t = 0; t < ms && r == EP_LISTENING; t += 32) {
+        r = endpoint_feed(e, db, 32);
+        if (at_ms) *at_ms = e->elapsed_ms;
+    }
+    return r;
+}
+
+static void test_endpoint(void)
+{
+    endpoint_t e;
+    int at = 0;
+    // A question after a moment's quiet: done about a second after it ends.
+    endpoint_init(&e);
+    CHECK(ep_run(&e, -55, 500, NULL) == EP_LISTENING);
+    CHECK(ep_run(&e, -25, 2500, NULL) == EP_LISTENING);
+    CHECK(ep_run(&e, -54, 3000, &at) == EP_DONE);
+    CHECK(at >= 3000 + EP_END_SILENCE_MS && at <= 3000 + EP_END_SILENCE_MS + 64);
+
+    // Short pauses between words don't end it.
+    endpoint_init(&e);
+    ep_run(&e, -50, 300, NULL);
+    for (int i = 0; i < 5; i++) {
+        CHECK(ep_run(&e, -22, 600, NULL) == EP_LISTENING);
+        CHECK(ep_run(&e, -49, 700, NULL) == EP_LISTENING);
+    }
+    CHECK(ep_run(&e, -49, 2000, NULL) == EP_DONE);
+
+    // Talking straight away, before the background could be heard.
+    endpoint_init(&e);
+    CHECK(ep_run(&e, -20, 1500, NULL) == EP_LISTENING && e.started);
+    CHECK(ep_run(&e, -52, 2000, NULL) == EP_DONE);
+
+    // Nothing said: gives up after EP_NO_SPEECH_MS.
+    endpoint_init(&e);
+    CHECK(ep_run(&e, -52, 20000, &at) == EP_NOTHING);
+    CHECK(at >= EP_NO_SPEECH_MS && at < EP_NO_SPEECH_MS + 64);
+
+    // Clicks and a cough don't count as a question.
+    endpoint_init(&e);
+    ep_run(&e, -52, 300, NULL);
+    for (int i = 0; i < 6; i++) {
+        ep_run(&e, -25, 64, NULL);
+        ep_run(&e, -52, 800, NULL);
+    }
+    CHECK(!e.started);
+    CHECK(ep_run(&e, -52, 20000, NULL) == EP_NOTHING);
+
+    // A noisy room: speech has to stand out from it.
+    endpoint_init(&e);
+    ep_run(&e, -42, 300, NULL);
+    CHECK(ep_run(&e, -38, 3000, NULL) == EP_LISTENING && !e.started);
+    CHECK(ep_run(&e, -24, 1000, NULL) == EP_LISTENING && e.started);
+    CHECK(ep_run(&e, -41, 2000, NULL) == EP_DONE);
+}
+
+static void test_power_src(void)
+{
+    power_src_t p;
+    int64_t t = 0;
+    // Steps of 5 s; returns the verdict at the end.
+    #define RUN(host, mv, quiet, secs) \
+        do { for (int _i = 0; _i < (secs) / 5; _i++) { t += 5000; power_src_update(&p, host, mv, quiet, t); } } while (0)
+
+    // On battery, slowly discharging: never USB.
+    power_src_init(&p, t);
+    for (int mv = 4000; mv > 3600; mv -= 2) RUN(false, mv, true, 5);
+    CHECK(!p.usb);
+
+    // A computer on the port: USB straight away, battery as soon as it's gone.
+    power_src_init(&p, t);
+    t += 1000;
+    CHECK(power_src_update(&p, true, 3800, true, t));
+    t += 1000;
+    CHECK(!power_src_update(&p, false, 3800, true, t));
+
+    // A charger with a flat battery: the voltage climbs, so USB within minutes.
+    power_src_init(&p, t);
+    RUN(false, 3650, true, 120);
+    CHECK(!p.usb);
+    int mv = 3650;
+    int64_t plugged = t;
+    while (!p.usb && t - plugged < 30 * 60000) {
+        mv += 1;  // ~12 mV a minute while charging
+        RUN(false, mv, true, 5);
+    }
+    CHECK(p.usb && t - plugged < 8 * 60000);
+
+    // Full on the charger: stays USB; unplugged, it sags and goes back to battery.
+    power_src_init(&p, t);
+    RUN(false, 4190, true, 120);
+    CHECK(p.usb);
+    RUN(false, 4185, true, 3600);
+    CHECK(p.usb);
+    int64_t unplugged = t;
+    for (mv = 4150; mv > 3900 && p.usb; mv -= 1) RUN(false, mv, true, 10);
+    CHECK(!p.usb && t - unplugged < 60 * 60000);
+
+    // On battery, a reply sags the voltage, which then recovers: not mistaken
+    // for charging, because readings wait for a minute of quiet.
+    power_src_init(&p, t);
+    RUN(false, 3900, true, 120);
+    RUN(false, 3780, false, 20);
+    RUN(false, 3890, false, 10);
+    RUN(false, 3895, true, 300);
+    CHECK(!p.usb);
+
+    // Failed readings change nothing.
+    RUN(false, -1, true, 600);
+    CHECK(!p.usb);
+    #undef RUN
+}
+
 int main(void)
 {
     test_sse();
@@ -806,6 +964,9 @@ int main(void)
     test_asr_tidy();
     test_memory();
     test_idle();
+    test_wake_words();
+    test_endpoint();
+    test_power_src();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -15,17 +15,18 @@ bash "$here/gen_headers.sh" "$gen"
 # Pass 1: as ESP-IDF compiles (GNU C). Pass 2: strict ISO C with the ESP32-S3's
 # 32-bit integer types (see xtensa_types/stdint.h), to catch printf format
 # mismatches that only fail on the real toolchain.
-# The voice component's own glue is checked too (the SVOX engine under
+# The voice and wake word components' own glue is checked too (the SVOX engine under
 # components/picotts/pico and the Oido engine in components/oido are
 # third-party code, built with their own flags; test/host builds them).
 pico="$root/components/picotts"
 count=0
-for src in "$root"/main/*.c "$root"/main/core/*.c "$pico"/picotts_esp.c "$pico"/picotts_direct.c; do
+for src in "$root"/main/*.c "$root"/main/core/*.c "$pico"/picotts_esp.c "$pico"/picotts_direct.c \
+    "$root"/components/wakeword/builtin_models.c; do
     for pass in gnu xtensa; do
         if [ "$pass" = gnu ]; then std=-std=gnu11; types=""; else std=-std=c11; types="-I$here/xtensa_types"; fi
         "$CC" $std -fsyntax-only -Wall -Wextra -Wformat=2 -Werror -DESP_PLATFORM $types \
             -I"$gen" -I"$here" -I"$root/main" -I"$root/main/core" -I"$pico/include" \
-            -I"$root/components/oido/include" -I"$root/components/oido" \
+            -I"$root/components/oido/include" -I"$root/components/oido" -I"$root/components/wakeword/include" \
             -I"$root/test/host/third_party/cJSON" -I"$here/esp_codec_dev" \
             $(case "$src" in "$pico"/*) echo "-I$pico/pico/lib -I$pico";; esac) "$src"
     done

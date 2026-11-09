@@ -18,6 +18,7 @@ void ui_show_notice(face_expr_t expr, const char *message, const char *footer);
 void ui_set_mode(face_mode_t mode);
 void ui_set_expr(face_expr_t expr);
 void ui_set_heard(const char *text);  // NULL or "" clears the "you: ..." strip
+void ui_set_hands_free(bool on);      // listening face says "Listening..." rather than "Tap BOOT when done"
 void ui_set_caption(const cap_page_t *page);
 void ui_clear_caption(void);
 void ui_set_speaking(float mouth, float look);  // mouth 0..1, look 0..1

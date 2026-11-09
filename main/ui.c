@@ -101,6 +101,17 @@ void ui_set_heard(const char *text)
     unlock_changed();
 }
 
+void ui_set_hands_free(bool on)
+{
+    lock();
+    if (s_state.hands_free == on) {
+        xSemaphoreGive(s_lock);
+        return;
+    }
+    s_state.hands_free = on;
+    unlock_changed();
+}
+
 void ui_set_caption(const cap_page_t *page)
 {
     lock();

@@ -25,6 +25,11 @@ typedef struct {
     char idle_activity[8];  // "off", "calm" or "lively"
     int idle_doze_minutes;  // drowsy after this long with nothing happening (0 = never)
 
+    char wake_word[24];        // a name from wake_words.h ("hey jarvis"...) or "off"
+    char wake_listen[8];       // "usb": only on USB power; "always": on battery too
+    char wake_sensitivity[8];  // "low", "normal" or "high"
+    bool wake_chime;           // a short tone when it hears the wake word
+
     int display_rotation;  // quarter turns, 0-3
     bool display_busy_active_high;
 

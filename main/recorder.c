@@ -5,6 +5,7 @@
 
 #include "audio.h"
 #include "audio_level.h"
+#include "endpoint.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -13,10 +14,11 @@ static const char *TAG = "recorder";
 
 #define CHUNK 512            // samples per read: 32 ms
 #define SKIP_START_CHUNKS 2  // the codec settles for a few ms after opening
-#define TRIM_END_MS 120      // drop the click of the button press that ended it
+#define TRIM_END_MS 120      // drop the click of the button press that ended it (not hands-free)
 #define LEVEL_EVERY_US (150 * 1000)
 
-esp_err_t recorder_capture(recording_t *out, int max_seconds, volatile bool *stop, recorder_level_cb_t on_level)
+esp_err_t recorder_capture(recording_t *out, int max_seconds, volatile bool *stop, recorder_level_cb_t on_level,
+                           bool hands_free)
 {
     memset(out, 0, sizeof *out);
     out->peak_dbfs = -96.0f;
@@ -33,6 +35,9 @@ esp_err_t recorder_capture(recording_t *out, int max_seconds, volatile bool *sto
     static int16_t chunk[CHUNK];  // internal RAM: the I2S driver copies from DMA here
     int64_t last_level = 0;
     int skipped = 0;
+    endpoint_t ep;
+    endpoint_init(&ep);
+    bool nothing_said = false;
     while (!*stop) {
         err = audio_mic_read(chunk, CHUNK);
         if (err != ESP_OK) break;
@@ -56,12 +61,24 @@ esp_err_t recorder_capture(recording_t *out, int max_seconds, volatile bool *sto
             out->hit_limit = true;
             break;
         }
+        if (hands_free) {
+            endpoint_result_t r = endpoint_feed(&ep, db, CHUNK * 1000 / AUDIO_SAMPLE_RATE);
+            if (r == EP_DONE) break;
+            if (r == EP_NOTHING) {
+                nothing_said = true;
+                break;
+            }
+        }
     }
     audio_mic_close();
     if (on_level) on_level(0.0f);
 
     size_t trim = (size_t)AUDIO_SAMPLE_RATE * TRIM_END_MS / 1000;
-    if (!out->hit_limit) out->samples = out->samples > trim ? out->samples - trim : 0;
+    if (!out->hit_limit && !hands_free) out->samples = out->samples > trim ? out->samples - trim : 0;
+    if (nothing_said) {
+        ESP_LOGI(TAG, "nothing said after the wake word");
+        out->samples = 0;
+    }
     ESP_LOGI(TAG, "%.1f s recorded, loudest %.0f dBFS%s", (double)out->samples / AUDIO_SAMPLE_RATE,
              (double)out->peak_dbfs, out->peak_dbfs < -50.0f ? " (very quiet: raise listen.mic_gain_db?)" : "");
     if (err != ESP_OK) recorder_free(out);

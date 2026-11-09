@@ -173,6 +173,7 @@ typedef struct {
 #define USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT() {.tx_buffer_size = 256, .rx_buffer_size = 256}
 esp_err_t usb_serial_jtag_driver_install(usb_serial_jtag_driver_config_t *cfg);
 int usb_serial_jtag_read_bytes(void *buf, uint32_t length, TickType_t wait);
+bool usb_serial_jtag_is_connected(void);
 void usb_serial_jtag_vfs_use_driver(void);
 void esp_vfs_usb_serial_jtag_use_driver(void);
 

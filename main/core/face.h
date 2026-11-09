@@ -35,6 +35,7 @@ typedef struct {
     float mouth;  // 0..1 mouth opening while speaking
     float look;   // 0..1 where the eyes look while reading along (0.5 = centre)
     float level;  // 0..1 mic level while listening
+    bool hands_free;  // listening started by the wake word: it stops by itself
     char heard[FACE_TEXT_MAX];  // top strip while listening/thinking (empty = none)
     char caption[FACE_CAPTION_LINES][FACE_TEXT_MAX];
     int caption_lines;

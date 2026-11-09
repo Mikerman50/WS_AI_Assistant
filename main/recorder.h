@@ -17,7 +17,10 @@ typedef struct {
 // Called a few times a second with the current level, 0..1.
 typedef void (*recorder_level_cb_t)(float level);
 
-// Blocks until *stop becomes true or max_seconds pass.
-esp_err_t recorder_capture(recording_t *out, int max_seconds, volatile bool *stop, recorder_level_cb_t on_level);
+// Blocks until *stop becomes true or max_seconds pass, or, when `hands_free`,
+// until a pause after speaking (see core/endpoint.h). Hands-free with nothing
+// said gives an empty recording.
+esp_err_t recorder_capture(recording_t *out, int max_seconds, volatile bool *stop, recorder_level_cb_t on_level,
+                           bool hands_free);
 
 void recorder_free(recording_t *r);

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "wake_words.h"
 
 void config_set_defaults(app_config_t *c)
 {
@@ -19,6 +20,10 @@ void config_set_defaults(app_config_t *c)
     c->listen_language_model = true;
     snprintf(c->idle_activity, sizeof c->idle_activity, "%s", "calm");
     c->idle_doze_minutes = 10;
+    snprintf(c->wake_word, sizeof c->wake_word, "%s", "hey jarvis");
+    snprintf(c->wake_listen, sizeof c->wake_listen, "%s", "usb");
+    snprintf(c->wake_sensitivity, sizeof c->wake_sensitivity, "%s", "normal");
+    c->wake_chime = true;
     c->display_rotation = 0;
     c->display_busy_active_high = true;
     c->speech_enabled = true;
@@ -182,6 +187,18 @@ bool config_parse(const char *json, app_config_t *c, char *err, size_t errsz)
     if (!x.failed && strcmp(c->idle_activity, "off") && strcmp(c->idle_activity, "calm") &&
         strcmp(c->idle_activity, "lively"))
         fail(&x, "idle.activity must be off, calm or lively.");
+
+    const cJSON *wake = section(&x, root, "wake_word");
+    get_str(&x, wake, "wake_word", "word", c->wake_word, sizeof c->wake_word, false);
+    get_str(&x, wake, "wake_word", "listen", c->wake_listen, sizeof c->wake_listen, false);
+    get_str(&x, wake, "wake_word", "sensitivity", c->wake_sensitivity, sizeof c->wake_sensitivity, false);
+    get_bool(&x, wake, "wake_word", "chime", &c->wake_chime);
+    if (!x.failed && !wake_word_is_off(c->wake_word) && !wake_word_find(c->wake_word))
+        fail(&x, "wake_word.word isn't one it knows (see README).");
+    if (!x.failed && strcmp(c->wake_listen, "usb") && strcmp(c->wake_listen, "always"))
+        fail(&x, "wake_word.listen must be usb or always.");
+    if (!x.failed && wake_sens_from_name(c->wake_sensitivity) < 0)
+        fail(&x, "wake_word.sensitivity must be low, normal or high.");
 
     const cJSON *display = section(&x, root, "display");
     get_int(&x, display, "display", "rotation", &c->display_rotation, 0, 3);

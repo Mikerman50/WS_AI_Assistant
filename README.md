@@ -1,8 +1,8 @@
 # E-ink Claude assistant (Waveshare ESP32-S3-ePaper-1.54 V2)
 
-A fully standalone home assistant: tap BOOT, ask your question out loud, tap
-again, and Claude answers through the board's speaker in a British English
-voice, with subtitles over an expressive 1-bit face whose mouth moves with the
+A fully standalone home assistant: say "Hey Jarvis" (or tap BOOT), ask your
+question out loud, and Claude answers through the board's speaker in a British
+English voice, with subtitles over an expressive 1-bit face whose mouth moves with the
 sound. The only service it talks to is Claude's API, so the only key it needs is
 your Anthropic one. There's no server of your own. All settings come from
 `config.json` on the microSD card, so one firmware image works for anyone.
@@ -14,6 +14,9 @@ Everything else runs on the ESP32-S3 itself:
   fine-tuned and cut down to 4 bits. It writes down any sentence, with no
   command list, and nothing you say leaves the board.
 - **Speaking:** SVOX Pico, the text-to-speech engine Android shipped for years.
+- **Wake word:** [microWakeWord](https://github.com/kahrendt/microWakeWord)
+  models, the ones ESPHome and Home Assistant voice devices use, on TensorFlow
+  Lite Micro.
 
 Oído's engine is GPLv3, so the firmware is GPLv3 as a whole if you share it
 (see [Licences](#licences)).
@@ -36,6 +39,11 @@ so a double tap never starts, stops or interrupts anything twice.
 
 PWR: a short press does a full refresh to clear ghosting; holding it switches the
 board off on battery, leaving the sleeping face on screen.
+
+Or hands-free: say the wake word ("Hey Jarvis" unless you pick another), wait
+for the chime, and ask. It stops listening by itself when you pause, so there's
+nothing to tap. A tap still finishes early, and holding BOOT still cancels. See
+[Wake word](#wake-word).
 
 You can also type questions over USB (see below), which skips the microphone.
 
@@ -121,6 +129,10 @@ the board's USB port, or run `idf.py monitor`. Type a question and press Enter.
 | `listen.max_seconds` | | `20` | Longest recording before it stops by itself (5 to 30) |
 | `listen.mic_gain_db` | | `30` | Microphone gain, 0 to 42 dB, in 6 dB steps |
 | `listen.language_model` | | `true` | Use `models/oido_v2.tlm` to pick between words that sound alike; `false` is a little quicker and a little less accurate |
+| `wake_word.word` | | `hey jarvis` | What to say to start a question hands-free: `hey jarvis`, `alexa`, `hey mycroft`, `okay nabu`, or `off` for button only |
+| `wake_word.listen` | | `usb` | `usb`: listen for it only on USB power, button only on battery. `always`: on battery too, which runs it down in hours rather than days |
+| `wake_word.sensitivity` | | `normal` | `high` hears it more easily but wakes by mistake more often; `low` the other way round |
+| `wake_word.chime` | | `true` | A short two-note chime when it hears the wake word |
 | `idle.activity` | | `calm` | What the face does between conversations: `off` (stays still), `calm` (blinks, glances, the occasional mood) or `lively` (more of everything) |
 | `idle.doze_minutes` | | `10` | Gets drowsy after this many minutes with nothing happening, and falls asleep after three times as long (0 = never) |
 | `display.rotation` | | `0` | Quarter turns (0 to 3) if the face is sideways or upside down |
@@ -195,6 +207,36 @@ evened out before recognition, but background hiss isn't, so speak within a
 metre or two. If recordings are quieter than about -40, raise
 `listen.mic_gain_db` by 6; if they're close to 0, lower it.
 
+### Wake word
+
+Between conversations the board listens for the wake word with a small neural
+network built for exactly that, fed 10 ms slices of sound. Nothing is recorded
+or sent anywhere while it waits. When it hears the word it chimes, shows the
+listening face and records until you pause for about a second. If you say
+nothing for six seconds it goes back to waiting.
+
+The four words are the ready-made models from ESPHome's collection. A word of
+your own ("Hey Claude", say) needs a model trained for it, which
+[microWakeWord](https://github.com/kahrendt/microWakeWord) can do on a PC. In a
+PC test, each model caught its word from the board's own voice at quiet, normal
+and loud levels, and never went off on ordinary sentences or the other wake
+words at `normal` or `low` sensitivity. On `high`, "Hey Mycroft" sometimes
+answered to "Alexa". Real rooms are harder: TV and conversation can set it off
+now and then, and if it misses you, say it again a little more clearly.
+
+**Power.** Listening keeps the microphone and processor busy all the time, so on
+the 1,200 mAh battery it would last hours, not days. With `"listen": "usb"` it
+only listens on USB power. The board has no pin that says whether USB is
+plugged in, so it judges from what it can see:
+- A computer on the USB port counts straight away.
+- With a charger it goes by the battery voltage: 4.15 V or more, or rising
+  steadily while nothing's happening.
+- Unplugged, it notices when the voltage falls back, which can take a while
+  with a full battery.
+
+`/wake` on the console shows what it's doing. While it's waiting on battery, the
+button works as always.
+
 ### The voice
 
 Replies are spoken a sentence at a time. Claude's reply streams in, each
@@ -246,12 +288,14 @@ Over the USB serial monitor:
 - `/forget` starts a new conversation
 - `/memory` shows what it remembers; `/forget-memory` empties `memory.txt`
 - `/battery` prints the battery voltage
+- `/wake` says whether it's listening for the wake word, or why not
 - `/reload` restarts and re-reads `config.json`
 - `/forget-settings` deletes the copy of the settings saved in flash
 
 ## How it fits together
 
 ```
+wake word (core 1) --.
 BOOT taps -> voice_ctl -> assistant -> recorder (ES8311 mic) -> stt (Oído, core 1) -> claude (streamed)
           -> speaker: synth task (Pico, core 1) -> player task (ES8311 speaker + subtitles) -> ui -> epd
 ```
@@ -261,7 +305,10 @@ BOOT taps -> voice_ctl -> assistant -> recorder (ES8311 mic) -> stt (Oído, core
 | `main/assistant.*` | The conversation loop: listen, transcribe, ask Claude, play the reply; cancel and interrupt |
 | `main/core/voice_ctl.*` | What each BOOT tap or hold means in each state, including the double-tap guards |
 | `main/audio.*` | ES8311 codec and I2S, set up like XiaoZhi's support for this board, via Espressif's `esp_codec_dev`; microphone and speaker share it, and the amplifier is only on while speaking |
-| `main/recorder.*` | Records 16 kHz mono into PSRAM with a live level meter |
+| `main/recorder.*`, `core/endpoint.*` | Records 16 kHz mono into PSRAM with a live level meter; hands-free, it stops at a pause |
+| `main/wake.*`, `core/wake_words.*`, `core/power_src.*` | Listens for the wake word between conversations, hands the microphone over for recording, and judges USB power from battery |
+| `components/wakeword/` | The wake word detector (TensorFlow's audio front end and a streaming model) and the four built-in models |
+| `components/micro_speech_features/` | TensorFlow's audio front end, as packaged by Kevin Ahrendt for ESPHome |
 | `main/stt.*`, `core/asr_text.*`, `core/audio_level.*` | Evens out the recording's level, runs Oído on its own task, tidies the text |
 | `components/oido/` | Oído's engine (GPLv3) and its 5.9 MB model, which the build writes to the `asr` flash partition |
 | `main/claude.*`, `claude_prompt.h` | Streaming Claude client, conversation history, the system prompt and personalities |
@@ -286,7 +333,10 @@ PSRAM holds the voice and language model files from the card (2.3 MB) and the
 language model's search state (0.75 MB), plus, only while they're needed, the
 recording and the recogniser's working memory (up to about 3 MB for 30 s) or
 the voice engine's 1.1 MB while a reply is spoken. The voice engine is stopped
-between replies, so the two never need their memory at the same time.
+between replies, so the two never need their memory at the same time. The wake
+word adds about 240 KB of models to the firmware, a 60 KB copy of the chosen
+one in PSRAM, and about 25 KB of working memory (internal RAM if there's plenty
+spare).
 
 ## Roadmap
 
@@ -296,12 +346,14 @@ between replies, so the two never need their memory at the same time.
    - Claude tools for timers on the PCF85063 RTC, room readings from the SHTC3,
      pinning notes, lists and QR codes, and searching a conversation log on the
      SD card.
-   - Deep sleep between conversations, and a wake word when on USB.
+   - Deep sleep between conversations on battery.
+3. **A wake word of your own,** trained with microWakeWord and loaded from the SD card.
 
 ## Tests
 
 ```sh
-make -C test/host test        # 388 unit checks with sanitisers (gestures, settings, captions, memory, idle...)
+make -C test/host test        # 455 unit checks with sanitisers (gestures, settings, captions, memory, idle,
+                              # wake word settings, end of speech, USB power...)
 make -C test/host tts         # the voice on a PC: speaks sample sentences into test/host/build/voice_*.wav,
                               # and checks it's bit-for-bit repeatable wherever its memory is
 make -C test/host asr         # listening end to end: the voice asks questions at three levels, the
@@ -311,6 +363,9 @@ make -C test/host speaker     # runs main/speaker.c with the real voice on stand
 make -C test/host components  # builds components/picotts and components/oido through their own
                               # CMakeLists.txt, and checks the model fits its partition (needs cmake)
 make -C test/host preview     # renders every face state to test/host/build/*.pbm
+make -C test/host wake TFLM=<path to esp-tflite-micro, tag v1.3.3.1>
+                              # the wake word detector on a PC, heard through the board's voice: each model
+                              # must catch its word and not go off on other speech (the workflow does this)
 ./test/idf_stub/check.sh      # compiles all firmware files without ESP-IDF, twice:
                               # as GNU C, and as strict C with the ESP32-S3's 32-bit integer
                               # types to catch printf mistakes that only fail on the real toolchain
@@ -332,6 +387,13 @@ esp_codec_dev 1.6.2 (Apache-2.0). Both are only used for the PC checks.
   (`sdcard/models/oido_v2.tlm`): CC-BY-4.0, by Lokutor.
 - **Voice:** SVOX Pico (Apache-2.0, `components/picotts/pico/lib/NOTICE`) by way
   of DiUS's esp-picotts (Apache-2.0).
+- **Wake word models** (`components/wakeword/models`): Apache-2.0, from ESPHome's
+  micro-wake-word-models by the Open Home Foundation (see the `LICENSE` and
+  `NOTICE` there). The wake words' names belong to their owners; using them
+  implies no affiliation. **TensorFlow Lite Micro** and **ESP-NN** (fetched by
+  the build from Espressif's component registry) and the **audio front end**
+  (`components/micro_speech_features`, by Kevin Ahrendt from TensorFlow's):
+  Apache-2.0.
 - **Fonts:** rendered from DejaVu Sans Bold (Bitstream Vera licence with
   public-domain changes).
 

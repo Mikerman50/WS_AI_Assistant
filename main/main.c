@@ -20,6 +20,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "idle.h"
+#include "wake.h"
+#include "wake_words.h"
 #include "memory.h"
 #include "nvs_flash.h"
 #include "sdcard.h"
@@ -154,6 +156,7 @@ void app_main(void)
     assistant_init(&s_cfg, audio_ok);
     // Last, so the recogniser only borrows internal RAM the rest has left spare.
     stt_init(&s_cfg, s_lm, s_lm_len);
+    wake_init(&s_cfg, audio_ok && stt_ready());
     s_running = true;
     xTaskCreate(idle_task, "idle", 3072, NULL, 2, NULL);
     ESP_LOGI(TAG, "ready: %u KB of PSRAM and %u KB of internal RAM free",
@@ -167,6 +170,10 @@ void app_main(void)
         ui_set_pinned(stt_problem());
     } else if (s_cfg.speech_enabled && !speaker_has_voice()) {
         ui_set_pinned("No voice files: subtitles only");
+    } else if (wake_word_find(s_cfg.wake_word)) {
+        char hint[64];
+        snprintf(hint, sizeof hint, "Say \"%s\" or tap BOOT", wake_word_find(s_cfg.wake_word)->name);
+        ui_set_pinned(hint);
     } else {
         ui_set_pinned("Tap BOOT to talk");
     }

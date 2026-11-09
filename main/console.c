@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ui.h"
+#include "wake.h"
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
 #include "driver/usb_serial_jtag_vfs.h"
@@ -59,6 +60,8 @@ static void handle(char *line)
         ESP_LOGI(TAG, "next question starts a new conversation");
     } else if (strcmp(line, "/battery") == 0) {
         ESP_LOGI(TAG, "battery %d mV", board_battery_mv());
+    } else if (strcmp(line, "/wake") == 0) {
+        ESP_LOGI(TAG, "wake word: %s", wake_status());
     } else if (strcmp(line, "/reload") == 0) {
         esp_restart();  // re-reads config.json from the SD card
     } else if (strcmp(line, "/forget-settings") == 0) {
@@ -66,7 +69,7 @@ static void handle(char *line)
         ESP_LOGI(TAG, "saved copy of the settings deleted; config.json on the card is untouched");
     } else {
         ESP_LOGI(TAG, "type a question, or /say <text>, /face <name>, /mode <name>, /pin <text>, /full, "
-                      "/forget, /memory, /forget-memory, /battery, /reload, /forget-settings");
+                      "/forget, /memory, /forget-memory, /battery, /wake, /reload, /forget-settings");
     }
 }
 

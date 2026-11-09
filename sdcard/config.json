@@ -16,6 +16,12 @@
     "mic_gain_db": 30,
     "language_model": true
   },
+  "wake_word": {
+    "word": "hey jarvis",
+    "listen": "usb",
+    "sensitivity": "normal",
+    "chime": true
+  },
   "idle": {
     "activity": "calm",
     "doze_minutes": 10

@@ -5,6 +5,7 @@
 #   make asr       listening end to end: the voice's speech -> level -> Oido -> text, word errors
 #   make speaker   run main/speaker.c with the real voice on stand-ins for FreeRTOS and the hardware
 #   make components  build components/picotts and components/oido through their CMakeLists.txt (needs cmake)
+#   make wake TFLM=<esp-tflite-micro v1.3.3.1>  the wake word detector, heard through the on-device voice
 
 CC ?= cc
 CORE_DIR := ../../main/core
@@ -99,3 +100,29 @@ clean:
 	rm -rf build
 
 .PHONY: all test preview tts asr speaker components clean
+
+# The wake word detector: components/wakeword on TensorFlow Lite Micro built for
+# the PC (reference kernels), heard through the on-device voice. Needs a copy of
+# https://github.com/espressif/esp-tflite-micro (tag v1.3.3.1) at TFLM.
+TFLM ?=
+WW_DIR := ../../components/wakeword
+MSF_DIR := ../../components/micro_speech_features
+build/tflm/libtflm.a:
+	@test -n "$(TFLM)" || (echo "set TFLM=/path/to/esp-tflite-micro" && false)
+	bash build_tflm.sh $(TFLM) build/tflm
+
+build/wake_loop: wake_loop.c $(WW_DIR)/wakeword.cc $(CORE_DIR)/wake_words.c build/tflm/libtflm.a build/pico.a | build
+	rm -rf build/msf && mkdir -p build/msf
+	for f in $(MSF_DIR)/src/*.c; do $(CC) -std=gnu11 -O2 -w -I$(MSF_DIR)/include -I$(MSF_DIR)/src \
+		-c -o build/msf/$$(basename $$f .c).o $$f || exit 1; done
+	ar rcs build/msf.a build/msf/*.o
+	g++ -std=c++17 -O2 -Wall -Wextra -Werror -fno-rtti -fno-exceptions -DTF_LITE_STATIC_MEMORY -isystem $(TFLM) \
+		-isystem $(TFLM)/third_party/flatbuffers/include -isystem $(TFLM)/third_party/gemmlowp -isystem $(TFLM)/third_party/ruy \
+		-I$(MSF_DIR)/include -I$(WW_DIR)/include -c -o build/wakeword.o $(WW_DIR)/wakeword.cc
+	mkdir -p build/wake && for f in wake_loop.c $(PICO_DIR)/picotts_direct.c $(CORE_DIR)/tts_text.c $(CORE_DIR)/utf8.c \
+		$(CORE_DIR)/wake_words.c; do $(CC) -std=gnu11 -Wall -Wextra -Werror -g -O1 -I$(CORE_DIR) -I$(PICO_DIR)/include \
+		-I$(PICO_DIR)/pico/lib -I$(PICO_DIR) -I$(WW_DIR)/include -c -o build/wake/$$(basename $$f .c).o $$f || exit 1; done
+	g++ -o $@ build/wake/*.o build/wakeword.o build/msf.a build/tflm/libtflm.a build/pico.a -lm
+
+wake: build/wake_loop
+	./build/wake_loop $(MODELS) $(WW_DIR)/models
